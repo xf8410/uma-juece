@@ -1,0 +1,70 @@
+// ===== 插件声明 =====
+// 应用 Android 应用插件（用于编译 APK）
+plugins {
+    id 'com.android.application'
+    // Kotlin Android 插件（支持 Kotlin 语言）
+    id 'org.jetbrains.kotlin.android'
+}
+
+// ===== Android 配置 =====
+android {
+    // 应用命名空间（唯一标识，类似包名）
+    namespace 'com.umaai.assistant'
+    // 编译 SDK 版本（34 = Android 14）
+    compileSdk 34
+
+    // ===== 默认配置 =====
+    defaultConfig {
+        // 应用 ID（安装到手机后的唯一标识）
+        applicationId "com.umaai.assistant"
+        // 最低支持 Android 版本（26 = Android 8.0）
+        minSdk 26
+        // 目标 SDK 版本
+        targetSdk 34
+        // 版本号（数字，用于判断更新）
+        versionCode 1
+        // 版本名称（显示给用户看）
+        versionName "1.0"
+    }
+
+    // ===== 构建类型 =====
+    buildTypes {
+        // release 版本（正式发布）
+        release {
+            // 不启用代码混淆（方便调试）
+            minifyEnabled false
+            // 混淆规则文件
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // ===== Java 编译选项 =====
+    compileOptions {
+        // 源代码使用 Java 17
+        sourceCompatibility JavaVersion.VERSION_17
+        // 目标字节码使用 Java 17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // ===== Kotlin 编译选项 =====
+    kotlinOptions {
+        // Kotlin 编译目标 JVM 版本
+        jvmTarget = '17'
+    }
+}
+
+// ===== 依赖管理 =====
+dependencies {
+    // AndroidX 核心库（Kotlin 扩展）
+    implementation 'androidx.core:core-ktx:1.12.0'
+    // AppCompat 兼容库（支持旧版 Android 的特性）
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    // Material Design 组件库
+    implementation 'com.google.android.material:material:1.11.0'
+    // 约束布局（用于界面布局）
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+    // ===== 本地 HTTP 服务器 =====
+    // NanoHTTPD：轻量级 HTTP 服务器，用于接收 Frida 发来的数据
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+}
