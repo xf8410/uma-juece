@@ -1,7 +1,10 @@
 package com.umaai.assistant.service;
 
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.IBinder;
@@ -19,6 +22,7 @@ public class FloatingWindowService extends Service {
     private WindowManager windowManager;
     private View floatingView;
     private TextView tvRecommend;
+    private BroadcastReceiver fakeDataReceiver;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -29,6 +33,7 @@ public class FloatingWindowService extends Service {
     public void onCreate() {
         super.onCreate();
 
+        // 初始化悬浮窗
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 
         floatingView = LayoutInflater.from(this).inflate(R.layout.floating_window, null);
@@ -53,6 +58,7 @@ public class FloatingWindowService extends Service {
         params.x = 100;
         params.y = 100;
 
+        // 拖拽
         floatingView.setOnTouchListener(new View.OnTouchListener() {
             private int initialX;
             private int initialY;
@@ -80,6 +86,18 @@ public class FloatingWindowService extends Service {
 
         windowManager.addView(floatingView, params);
         tvRecommend.setText("等待数据...");
+
+        // 注册广播接收器（接收假数据）
+        fakeDataReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String data = intent.getStringExtra("fake_data");
+                if (data != null) {
+                    updateRecommend(data);
+                }
+            }
+        };
+        registerReceiver(fakeDataReceiver, new IntentFilter("com.umaai.assistant.FAKE_DATA"));
     }
 
     @Override
@@ -88,8 +106,12 @@ public class FloatingWindowService extends Service {
         if (floatingView != null) {
             windowManager.removeView(floatingView);
         }
+        if (fakeDataReceiver != null) {
+            unregisterReceiver(fakeDataReceiver);
+        }
     }
 
+    // 更新悬浮窗显示文字
     public void updateRecommend(String text) {
         if (tvRecommend != null) {
             tvRecommend.setText(text);
