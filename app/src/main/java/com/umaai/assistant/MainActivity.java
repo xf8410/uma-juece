@@ -19,6 +19,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // 启动悬浮窗按钮
         Button btnStart = findViewById(R.id.btn_start_float);
         btnStart.setOnClickListener(v -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -29,6 +30,15 @@ public class MainActivity extends Activity {
                 startService(new Intent(this, FloatingWindowService.class));
                 Toast.makeText(this, "悬浮窗已启动", Toast.LENGTH_SHORT).show();
             }
+        });
+
+        // 测试按钮：发送假数据广播
+        Button btnTest = findViewById(R.id.btn_test_fake);
+        btnTest.setOnClickListener(v -> {
+            Intent intent = new Intent("com.umaai.assistant.FAKE_DATA");
+            intent.putExtra("fake_data", "速度+5，耐力+3，推荐训练: 速度");
+            sendBroadcast(intent);
+            Toast.makeText(this, "已发送测试数据", Toast.LENGTH_SHORT).show();
         });
     }
 
