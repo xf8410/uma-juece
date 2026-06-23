@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 测试按钮：发送假数据广播
+        // 测试按钮
         Button btnTest = findViewById(R.id.btn_test_fake);
         btnTest.setOnClickListener(v -> {
             Intent intent = new Intent("com.umaai.assistant.FAKE_DATA");
