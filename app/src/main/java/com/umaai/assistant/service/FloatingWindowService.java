@@ -17,6 +17,7 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,6 +32,7 @@ public class FloatingWindowService extends Service {
 
     private WindowManager windowManager;
     private View floatingView;
+    private ImageView floatImage;
     private TextView tvRecommend;
     private BroadcastReceiver fakeDataReceiver;
     private Handler handler = new Handler(android.os.Looper.getMainLooper());
@@ -85,8 +87,8 @@ public class FloatingWindowService extends Service {
         try {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
             floatingView = LayoutInflater.from(this).inflate(R.layout.floating_window, null);
+            floatImage = floatingView.findViewById(R.id.float_image);
             tvRecommend = floatingView.findViewById(R.id.tv_recommend);
-            floatingView.setBackgroundColor(Color.parseColor("#CC333333"));
 
             int layoutFlag;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -95,11 +97,14 @@ public class FloatingWindowService extends Service {
                 layoutFlag = WindowManager.LayoutParams.TYPE_PHONE;
             }
 
-            // 动态计算悬浮窗尺寸（屏幕百分比）
+            // 固定悬浮窗尺寸（适配120dp图片 + 文字区域）
+            // 120dp ≈ 360-480px 根据屏幕密度
             android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
             windowManager.getDefaultDisplay().getMetrics(dm);
-            int w = Math.min(dm.widthPixels * 3 / 4, 500);
-            int h = Math.min(dm.heightPixels / 6, 180);
+            int density = dm.densityDpi;
+            int dp120 = (int) (120 * (density / 160f));
+            int w = dp120 + 20;  // 图片宽度 + 边距
+            int h = dp120 + 60;  // 图片高度 + 文字区域
 
             params = new WindowManager.LayoutParams(
                     w, h, layoutFlag,
