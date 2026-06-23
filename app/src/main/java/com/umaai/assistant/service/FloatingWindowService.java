@@ -134,34 +134,31 @@ public class FloatingWindowService extends Service {
                 }
             }, 500);
         }
-    }
-
-    private void registerReceiver() {
-        fakeDataReceiver = new BroadcastReceiver() {            @Override
-            public void onReceive(Context context, Intent intent) {
-                String data = intent.getStringExtra("fake_data");
-                if (data != null && tvRecommend != null) {
-                    tvRecommend.setText(data);
-                    Toast.makeText(FloatingWindowService.this, "📩 收到: " + data, Toast.LENGTH_SHORT).show();
-                }
+    }private void registerReceiver() {
+    fakeDataReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String data = intent.getStringExtra("fake_data");
+            if (data != null && tvRecommend != null) {
+                tvRecommend.setText(data);
+                Toast.makeText(FloatingWindowService.this, "📩 收到: " + data, Toast.LENGTH_SHORT).show();
             }
-        };
-        registerReceiver(fakeDataReceiver, new IntentFilter("com.umaai.assistant.FAKE_DATA"));
-    }
+        }
+    };
+    registerReceiver(fakeDataReceiver, new IntentFilter("com.umaai.assistant.FAKE_DATA"));
+}
 
-    private void startAutoUpdate() {
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (tvRecommend != null && !tvRecommend.getText().toString().startsWith("速度")) {
-                    tvRecommend.setText("🟢 存活中");
-                }
-                handler.postDelayed(this, 3000);
+private void startAutoUpdate() {
+    handler.postDelayed(new Runnable() {
+        @Override
+        public void run() {
+            if (tvRecommend != null && !tvRecommend.getText().toString().startsWith("速度")) {
+                tvRecommend.setText("🟢 存活中");
             }
-        }, 3000);
-    }
-
-    @Override
+            handler.postDelayed(this, 3000);
+        }
+    }, 3000);
+}    @Override
     public void onDestroy() {
         super.onDestroy();
         if (floatingView != null && isViewAdded) {
@@ -177,4 +174,3 @@ public class FloatingWindowService extends Service {
         handler.removeCallbacksAndMessages(null);
     }
 }
- 
