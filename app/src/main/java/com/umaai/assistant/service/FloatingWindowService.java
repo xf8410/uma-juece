@@ -45,11 +45,8 @@ public class FloatingWindowService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        // 创建通知渠道（Android 8.0+ 必须）
         createNotificationChannel();
-        // 启动前台服务（提高进程优先级，减少被杀概率）
         startForeground(NOTIFICATION_ID, createNotification());
-
         Toast.makeText(this, "Service 启动", Toast.LENGTH_SHORT).show();
         createFloatingView();
         registerReceiver();
@@ -91,7 +88,6 @@ public class FloatingWindowService extends Service {
             tvRecommend = floatingView.findViewById(R.id.tv_recommend);
             floatingView.setBackgroundColor(Color.RED);
 
-            // 窗口参数（针对 ColorOS 优化）
             int layoutFlag;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 layoutFlag = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
@@ -109,7 +105,6 @@ public class FloatingWindowService extends Service {
             );
             params.gravity = Gravity.CENTER;
 
-            // 尝试添加
             addViewWithRetry();
         } catch (Exception e) {
             Toast.makeText(this, "初始化失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -125,7 +120,6 @@ public class FloatingWindowService extends Service {
             startAutoUpdate();
         } catch (Exception e) {
             Toast.makeText(this, "❌ 添加失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            // 延迟 1 秒重试
             handler.postDelayed(() -> {
                 try {
                     if (!isViewAdded) {
@@ -137,3 +131,11 @@ public class FloatingWindowService extends Service {
                     }
                 } catch (Exception ex) {
                     Toast.makeText(FloatingWindowService.this, "❌ 重试失败: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            }, 500);
+        }
+    }
+
+    private void registerReceiver() {
+        fakeDataReceiver = new BroadcastReceiver() {
+ 
