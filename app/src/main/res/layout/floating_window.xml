@@ -19,7 +19,10 @@
         android:background="#CC000000"
         android:textColor="#FFFFFF"
         android:textSize="11sp"
-        android:padding="4dp 8dp"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
         android:text="等待数据..." />
 
 </FrameLayout>
