@@ -24,8 +24,9 @@ public class MainActivity extends Activity {
                         Uri.parse("package:" + getPackageName()));
                 startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST);
             } else {
-                startService(new Intent(this, FloatingWindowService.class));
-                Toast.makeText(this, "悬浮窗已启动", Toast.LENGTH_SHORT).show();
+                // 暂时屏蔽悬浮窗功能，因为 FloatingWindowService 尚未实现
+                // startService(new Intent(this, FloatingWindowService.class));
+                Toast.makeText(this, "悬浮窗功能暂不可用", Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -35,8 +36,9 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
-                startService(new Intent(this, FloatingWindowService.class));
-                Toast.makeText(this, "悬浮窗已启动", Toast.LENGTH_SHORT).show();
+                // 暂时屏蔽悬浮窗功能
+                // startService(new Intent(this, FloatingWindowService.class));
+                Toast.makeText(this, "悬浮窗权限已授予，但功能暂不可用", Toast.LENGTH_SHORT).show();
             } else {
                 Toast.makeText(this, "需要悬浮窗权限", Toast.LENGTH_SHORT).show();
             }
