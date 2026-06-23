@@ -33,7 +33,7 @@ public class FloatingWindowService extends Service {
     private View floatingView;
     private TextView tvRecommend;
     private BroadcastReceiver fakeDataReceiver;
-    private Handler handler = new Handler();
+    private Handler handler = new Handler(android.os.Looper.getMainLooper());
     private boolean isViewAdded = false;
     private WindowManager.LayoutParams params;
 
@@ -86,7 +86,7 @@ public class FloatingWindowService extends Service {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
             floatingView = LayoutInflater.from(this).inflate(R.layout.floating_window, null);
             tvRecommend = floatingView.findViewById(R.id.tv_recommend);
-            floatingView.setBackgroundColor(Color.RED);
+            floatingView.setBackgroundColor(Color.parseColor("#CC333333"));
 
             int layoutFlag;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -95,15 +95,22 @@ public class FloatingWindowService extends Service {
                 layoutFlag = WindowManager.LayoutParams.TYPE_PHONE;
             }
 
+            // 动态计算悬浮窗尺寸（屏幕百分比）
+            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+            windowManager.getDefaultDisplay().getMetrics(dm);
+            int w = Math.min(dm.widthPixels * 3 / 4, 500);
+            int h = Math.min(dm.heightPixels / 6, 180);
+
             params = new WindowManager.LayoutParams(
-                    400,
-                    200,
-                    layoutFlag,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    w, h, layoutFlag,
+                    // 修复: 移除FLAG_LAYOUT_IN_SCREEN（导致闪回桌面的元凶）
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSLUCENT
             );
-            params.gravity = Gravity.CENTER;
+            // 修复: 使用TOP|START+偏移，避免CENTER覆盖全屏触发返回桌面
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.x = dm.widthPixels / 20;
+            params.y = dm.heightPixels / 10;
 
             addViewWithRetry();
         } catch (Exception e) {
@@ -112,53 +119,57 @@ public class FloatingWindowService extends Service {
     }
 
     private void addViewWithRetry() {
-        try {
-            windowManager.addView(floatingView, params);
-            isViewAdded = true;
-            tvRecommend.setText("等待数据...");
-            Toast.makeText(this, "✅ 悬浮窗添加成功", Toast.LENGTH_SHORT).show();
-            startAutoUpdate();
-        } catch (Exception e) {
-            Toast.makeText(this, "❌ 添加失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            handler.postDelayed(() -> {
-                try {
-                    if (!isViewAdded) {
-                        windowManager.addView(floatingView, params);
-                        isViewAdded = true;
-                        tvRecommend.setText("重试成功");
-                        Toast.makeText(FloatingWindowService.this, "✅ 重试添加成功", Toast.LENGTH_SHORT).show();
-                        startAutoUpdate();
-                    }
-                } catch (Exception ex) {
-                    Toast.makeText(FloatingWindowService.this, "❌ 重试失败: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+        handler.post(() -> {
+            try {
+                if (floatingView != null && floatingView.getParent() == null) {
+                    windowManager.addView(floatingView, params);
+                    isViewAdded = true;
+                    if (tvRecommend != null) tvRecommend.setText("等待数据...");
                 }
-            }, 500);
-        }
-    }private void registerReceiver() {
-    fakeDataReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String data = intent.getStringExtra("fake_data");
-            if (data != null && tvRecommend != null) {
-                tvRecommend.setText(data);
-                Toast.makeText(FloatingWindowService.this, "📩 收到: " + data, Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                // 延迟重试一次
+                handler.postDelayed(() -> {
+                    try {
+                        if (!isViewAdded && floatingView != null && floatingView.getParent() == null) {
+                            windowManager.addView(floatingView, params);
+                            isViewAdded = true;
+                            if (tvRecommend != null) tvRecommend.setText("等待数据...");
+                        }
+                    } catch (Exception ex) {
+                        // 彻底放弃，但Service继续运行
+                    }
+                }, 1000);
             }
-        }
-    };
-    registerReceiver(fakeDataReceiver, new IntentFilter("com.umaai.assistant.FAKE_DATA"));
-}
+        });
+    }
 
-private void startAutoUpdate() {
-    handler.postDelayed(new Runnable() {
-        @Override
-        public void run() {
-            if (tvRecommend != null && !tvRecommend.getText().toString().startsWith("速度")) {
-                tvRecommend.setText("🟢 存活中");
+    private void registerReceiver() {
+        fakeDataReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String data = intent.getStringExtra("fake_data");
+                if (data != null && tvRecommend != null) {
+                    tvRecommend.setText(data);
+                }
             }
-            handler.postDelayed(this, 3000);
-        }
-    }, 3000);
-}    @Override
+        };
+        registerReceiver(fakeDataReceiver, new IntentFilter("com.umaai.assistant.FAKE_DATA"));
+    }
+
+    private void startAutoUpdate() {
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (tvRecommend != null) {
+                    String text = tvRecommend.getText().toString();
+                    if (!text.startsWith("速度") && !text.startsWith("等待")) {
+                        tvRecommend.setText("运行中...");
+                    }
+                }
+                handler.postDelayed(this, 5000);
+            }
+        }, 5000);
+    }    @Override
     public void onDestroy() {
         super.onDestroy();
         if (floatingView != null && isViewAdded) {
@@ -169,7 +180,7 @@ private void startAutoUpdate() {
             }
         }
         if (fakeDataReceiver != null) {
-            unregisterReceiver(fakeDataReceiver);
+            try { unregisterReceiver(fakeDataReceiver); } catch (Exception e) { /* ignore */ }
         }
         handler.removeCallbacksAndMessages(null);
     }
