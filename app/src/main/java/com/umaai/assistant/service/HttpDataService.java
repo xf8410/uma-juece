@@ -174,6 +174,7 @@ public class HttpDataService extends NanoHTTPD {
             test.put("max_stamina", 100);
             test.put("motivation", "好調");
             test.put("recommend", "耐力 SP訓練 4人/友情2/失敗率6%");
+            test.put("recommend_type", "stamina");
 
             JSONObject spd = new JSONObject();
             spd.put("current", 1050); spd.put("remain", 550); spd.put("gain", 99); spd.put("pt", 13);

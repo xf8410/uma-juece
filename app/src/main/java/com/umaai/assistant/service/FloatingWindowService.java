@@ -32,7 +32,7 @@ import org.json.JSONObject;
 /**
  * 小黑板风格浮窗服务
  * 黑底+彩色文字，模仿URA训练分析面板
- * 
+ *
  * 数据格式（Hook端推送JSON）：
  * {
  *   "turn": "Classic 1年",
@@ -40,10 +40,11 @@ import org.json.JSONObject;
  *   "stamina": 64, "max_stamina": 100,
  *   "motivation": "好調",
  *   "recommend": "速度 SP訓練 4人/友情2/失敗率6%",
+ *   "recommend_type": "speed",  // speed/stamina/power/guts/wisdom
  *   "speed": {"current":1050,"remain":550,"gain":99,"pt":13},
  *   "stamina_stat": {"current":685,"remain":915,"gain":47,"pt":18},
  *   "power": {"current":959,"remain":641,"gain":1,"pt":0},
- * "guts": {"current":554,"remain":1046,"gain":21,"pt":7},
+ *   "guts": {"current":554,"remain":1046,"gain":21,"pt":7},
  *   "wisdom": {"current":543,"remain":1057,"gain":28,"pt":9},
  *   "facility": "2 5 4 4 3"
  * }
@@ -56,6 +57,19 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public static final String ACTION_DATA = "com.umaai.assistant.ACTION_DATA";
     public static final String EXTRA_DATA = "data";
 
+    // 五维颜色常量
+    private static final int COLOR_SPD = 0xFF4488FF;
+    private static final int COLOR_SPD_DIM = 0xFF6688CC;
+    private static final int COLOR_STA = 0xFFFF4444;
+    private static final int COLOR_STA_DIM = 0xFFCC6666;
+    private static final int COLOR_PWR = 0xFFFF8800;
+    private static final int COLOR_PWR_DIM = 0xFFCC8844;
+    private static final int COLOR_GUT = 0xFFFF66AA;
+    private static final int COLOR_GUT_DIM = 0xFFCC6688;
+    private static final int COLOR_WIT = 0xFFFFDD00;
+    private static final int COLOR_WIT_DIM = 0xFFCCBB44;
+    private static final int COLOR_DEFAULT = 0xFF00FF88;
+
     private WindowManager windowManager;
     private View floatingView;
     private WindowManager.LayoutParams params;
@@ -66,11 +80,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvTurn, tvTotal, tvStamina, tvMotivation;
     // 推荐
     private TextView tvRecommend;
-    // 五维: 速耐力根智
-    private TextView tvSpdVal, tvSpdGain;
-    private TextView tvStaVal, tvStaGain;
-    private TextView tvPwrVal, tvPwrGain;
-    private TextView tvGutVal, tvGutGain;
+    // 五维
+    private TextView tvSpdVal, tvSpdGain, tvStaVal, tvStaGain;
+    private TextView tvPwrVal, tvPwrGain, tvGutVal, tvGutGain;
     private TextView tvWitVal, tvWitGain;
     // 底部
     private TextView tvFacility, tvHookStatus;
@@ -139,10 +151,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     tvHookStatus.setText(online ? "Hook:ONLINE" : "Hook:---");
                     tvHookStatus.setTextColor(online ? 0xFF00FF88 : 0xFF555555);
                 }
+                if (online && tvRecommend != null) {
+                    tvRecommend.setTextColor(COLOR_DEFAULT);
+                    tvRecommend.setText("已连接Hook，等待数据...");
+                }
             });
-            if (online && tvRecommend != null) {
-                handler.post(() -> tvRecommend.setText("已连接Hook，等待数据..."));
-            }
         }
     }
 
@@ -161,7 +174,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         // 纯文本 → 显示在推荐区
         handler.post(() -> {
-            if (tvRecommend != null) tvRecommend.setText(data);
+            if (tvRecommend != null) {
+                tvRecommend.setTextColor(COLOR_DEFAULT);
+                tvRecommend.setText(data);
+            }
         });
     }
 
@@ -181,25 +197,47 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     int sta = json.getInt("stamina");
                     int maxSta = json.optInt("max_stamina", 100);
                     tvStamina.setText("体" + sta + "/" + maxSta);
+                    // 体力低警告
+                    if (sta <= 30) {
+                        tvStamina.setTextColor(0xFFFF4444);
+                    } else if (sta <= 50) {
+                        tvStamina.setTextColor(0xFFFFAA00);
+                    } else {
+                        tvStamina.setTextColor(0xFF66CCFF);
+                    }
                 }
                 if (json.has("motivation")) {
-                    tvMotivation.setText(json.getString("motivation"));
+                    String mot = json.getString("motivation");
+                    tvMotivation.setText(mot);
+                    // 干劲颜色
+                    if (mot.contains("絶好") || mot.contains("好調")) {
+                        tvMotivation.setTextColor(0xFFFFCC00);
+                    } else if (mot.contains("普通")) {
+                        tvMotivation.setTextColor(0xFFAAAAAA);
+                    } else {
+                        tvMotivation.setTextColor(0xFFFF4444);
+                    }
                 }
 
                 // 推荐
                 if (json.has("recommend")) {
                     String rec = json.getString("recommend");
                     tvRecommend.setText("\u25B6 " + rec);
-                    // 如果推荐包含训练名，高亮颜色
-                    setRecommendColor(rec);
+                    // 用recommend_type精确设置颜色，否则从文字推断
+                    String recType = json.optString("recommend_type", "");
+                    if (!recType.isEmpty()) {
+                        setRecommendColorByType(recType);
+                    } else {
+                        setRecommendColorByText(rec);
+                    }
                 }
 
                 // 五维属性
-                updateStat(tvSpdVal, tvSpdGain, json, "speed");
-                updateStat(tvStaVal, tvStaGain, json, "stamina_stat");
-                updateStat(tvPwrVal, tvPwrGain, json, "power");
-                updateStat(tvGutVal, tvGutGain, json, "guts");
-                updateStat(tvWitVal, tvWitGain, json, "wisdom");
+                updateStat(tvSpdVal, tvSpdGain, json, "speed", COLOR_SPD, COLOR_SPD_DIM);
+                updateStat(tvStaVal, tvStaGain, json, "stamina_stat", COLOR_STA, COLOR_STA_DIM);
+                updateStat(tvPwrVal, tvPwrGain, json, "power", COLOR_PWR, COLOR_PWR_DIM);
+                updateStat(tvGutVal, tvGutGain, json, "guts", COLOR_GUT, COLOR_GUT_DIM);
+                updateStat(tvWitVal, tvWitGain, json, "wisdom", COLOR_WIT, COLOR_WIT_DIM);
 
                 // 设施
                 if (json.has("facility")) {
@@ -208,12 +246,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
             } catch (JSONException e) {
                 Log.w(TAG, "JSON parse error: " + e.getMessage());
-                tvRecommend.setText(json.toString());
+                if (tvRecommend != null) tvRecommend.setText(json.toString());
             }
         });
     }
 
-    private void updateStat(TextView tvVal, TextView tvGain, JSONObject json, String key) throws JSONException {
+    private void updateStat(TextView tvVal, TextView tvGain, JSONObject json,
+                            String key, int brightColor, int dimColor) throws JSONException {
         if (!json.has(key)) return;
         JSONObject stat = json.getJSONObject(key);
         int current = stat.optInt("current", 0);
@@ -228,25 +267,35 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (pt > 0) gainStr.append(" Pt").append(pt);
         tvGain.setText(gainStr.toString());
 
-        // 增量>0时高亮
-        if (gain > 0) {
-            tvGain.setTextColor(0xFF00FF88);
+        // 有增益高亮，无增益恢复暗色
+        tvGain.setTextColor(gain > 0 ? brightColor : dimColor);
+    }
+
+    private void setRecommendColorByType(String type) {
+        switch (type) {
+            case "speed":       tvRecommend.setTextColor(COLOR_SPD); break;
+            case "stamina":     tvRecommend.setTextColor(COLOR_STA); break;
+            case "power":       tvRecommend.setTextColor(COLOR_PWR); break;
+            case "guts":        tvRecommend.setTextColor(COLOR_GUT); break;
+            case "wisdom":      tvRecommend.setTextColor(COLOR_WIT); break;
+            default:            tvRecommend.setTextColor(COLOR_DEFAULT); break;
         }
     }
 
-    private void setRecommendColor(String rec) {
+    private void setRecommendColorByText(String rec) {
+        // 从推荐文字推断训练类型
         if (rec.contains("速")) {
-            tvRecommend.setTextColor(0xFF4488FF);
-        } else if (rec.contains("耐")) {
-            tvRecommend.setTextColor(0xFFFF4444);
-        } else if (rec.contains("力") && !rec.contains("力量")) {
-            tvRecommend.setTextColor(0xFFFF8800);
-        } else if (rec.contains("根")) {
-            tvRecommend.setTextColor(0xFFFF66AA);
-        } else if (rec.contains("智")) {
-            tvRecommend.setTextColor(0xFFFFDD00);
+            tvRecommend.setTextColor(COLOR_SPD);
+        } else if (rec.contains("耐") || rec.contains("スタミナ")) {
+            tvRecommend.setTextColor(COLOR_STA);
+        } else if (rec.contains("力") || rec.contains("パワー")) {
+            tvRecommend.setTextColor(COLOR_PWR);
+        } else if (rec.contains("根") || rec.contains("根性")) {
+            tvRecommend.setTextColor(COLOR_GUT);
+        } else if (rec.contains("智") || rec.contains("賢さ")) {
+            tvRecommend.setTextColor(COLOR_WIT);
         } else {
-            tvRecommend.setTextColor(0xFF00FF88);
+            tvRecommend.setTextColor(COLOR_DEFAULT);
         }
     }
 
@@ -256,7 +305,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             httpServer = new HttpDataService(this);
             httpServer.startServer();
             Log.d(TAG, "HTTP server started on port " + HttpDataService.PORT);
-            updateNotification("HTTP:" + HttpDataService.PORT + " | 等待连接");
+            updateNotification("HTTP:" + HttpDataService.PORT + " | 小黑板模式");
         } catch (Exception e) {
             Log.e(TAG, "HTTP server start failed: " + e.getMessage(), e);
         }
