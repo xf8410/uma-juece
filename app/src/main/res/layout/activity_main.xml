@@ -21,4 +21,23 @@
         android:layout_centerHorizontal="true"
         android:layout_marginTop="30dp" />
 
+    <Button
+        android:id="@+id/btn_test_http"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="测试HTTP通信"
+        android:layout_below="@+id/btn_test_fake"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="30dp" />
+
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/btn_test_http"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="30dp"
+        android:text="HTTP服务: 未启动"
+        android:textSize="14sp" />
+
 </RelativeLayout>
