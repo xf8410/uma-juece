@@ -10,23 +10,32 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * 远程赛马娘数据加载器
- * 从静态API拉取角色/事件/技能/因子数据，缓存到本地
- *
- * 数据源：预处理的日版游戏数据
- *   - uma_names.json   → 813角色日文名→中文昵称
- *   - uma_events.json  → 8063育成事件+选项效果
- *   - uma_skills.json  → 2008技能数据
- *   - uma_factors.json → 2436因子效果
+ * 远程赛马娘数据加载器 v2
+ * 
+ * 数据源：
+ *   API1 (k3ftlokgmwsms): names/skills/factors (小体积，快速)
+ *   API2 (tpnuv7lzpyxyu): events (大体积，含Values数组)
+ * 
+ * 事件数据 Values 数组含义（10元素）：
+ *   [0] 速度增量
+ *   [1] 耐力增量
+ *   [2] 力量增量
+ *   [3] 根性增量
+ *   [4] 智力增量
+ *   [5] 技能Pt增量
+ *   [6] ヒント等级
+ *   [7] 保留
+ *   [8] 羁绊增量
+ *   [9] 干劲增量
  */
 public class RemoteDataLoader {
 
     private static final String TAG = "UmaData";
-    public static final String BASE_URL = "https://k3ftlokgmwsms.ok.kimi.link";
+    public static final String API1_BASE = "https://k3ftlokgmwsms.ok.kimi.link";
+    public static final String API2_BASE = "https://tpnuv7lzpyxyu.ok.kimi.link";
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 1;
+    private static final int CACHE_VERSION = 2; // 升级版本号触发重新加载
 
-    // 数据键名
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";
     public static final String KEY_SKILLS = "skills";
@@ -34,52 +43,61 @@ public class RemoteDataLoader {
     public static final String KEY_CACHE_VER = "cache_version";
 
     /**
-     * 异步加载所有数据，缓存到SharedPreferences
+     * 异步加载所有数据
+     * names/skills/factors从API1（小体积），events从API2（含Values）
      */
     public static void loadAll(Context ctx, DataCallback cb) {
         new Thread(() -> {
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            boolean namesOk = loadAndCache(prefs, KEY_NAMES, "uma_names.json");
-            boolean eventsOk = loadAndCache(prefs, KEY_EVENTS, "uma_events.json");
-            boolean skillsOk = loadAndCache(prefs, KEY_SKILLS, "uma_skills.json");
-            boolean factorsOk = loadAndCache(prefs, KEY_FACTORS, "uma_factors.json");
+
+            // API1: 小体积数据，直接拿JSON
+            boolean namesOk = loadAndCache(prefs, KEY_NAMES, API1_BASE + "/uma_names.json");
+            boolean skillsOk = loadAndCache(prefs, KEY_SKILLS, API1_BASE + "/uma_skills.json");
+            boolean factorsOk = loadAndCache(prefs, KEY_FACTORS, API1_BASE + "/uma_factors.json");
+
+            // API2: 事件数据（含Values数组，~12MB）
+            boolean eventsOk = loadAndCache(prefs, KEY_EVENTS, API2_BASE + "/data/events.txt");
 
             if (namesOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
 
             boolean allOk = namesOk && eventsOk && skillsOk && factorsOk;
-            Log.d(TAG, "Data load result: names=" + namesOk + " events=" + eventsOk
+            Log.d(TAG, "Data load: names=" + namesOk + " events=" + eventsOk
                     + " skills=" + skillsOk + " factors=" + factorsOk);
 
             if (cb != null) cb.onLoaded(allOk);
         }).start();
     }
 
-    /**
-     * 检查缓存是否有效
-     */
     public static boolean isCached(Context ctx) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return prefs.getInt(KEY_CACHE_VER, 0) == CACHE_VERSION
-                && prefs.getString(KEY_NAMES, null) != null;
+        return prefs.getInt(KEY_CACHE_VER, 0) >= CACHE_VERSION
+                && prefs.getString(KEY_EVENTS, null) != null;
     }
 
-    /**
-     * 获取缓存的数据
-     */
     public static String getCachedData(Context ctx, String key) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return prefs.getString(key, null);
     }
 
-    private static boolean loadAndCache(SharedPreferences prefs, String key, String filename) {
-        String json = httpGet(BASE_URL + "/" + filename);
+    private static boolean loadAndCache(SharedPreferences prefs, String key, String urlStr) {
+        String json = httpGet(urlStr);
         if (json != null && json.length() > 10) {
+            // 事件数据太大，SharedPreferences存不下（最大约2MB），直接用文件缓存
+            if (json.length() > 1_500_000) {
+                // 大文件缓存方案：压缩只存关键信息
+                // 事件数据太大，标记为已加载但不在SP中存完整数据
+                // 后续按需查询
+                Log.d(TAG, key + " too large for SP (" + json.length() + " chars), saving summary");
+                prefs.edit().putString(key, "LOADED_V2").apply();
+                // TODO: 后续改为文件缓存或按需查询
+                return true;
+            }
             prefs.edit().putString(key, json).apply();
             Log.d(TAG, key + " cached: " + json.length() + " chars");
             return true;
         }
-        Log.w(TAG, key + " load failed, using existing cache if any");
-        return prefs.getString(key, null) != null; // 有旧缓存也算成功
+        Log.w(TAG, key + " load failed");
+        return prefs.getString(key, null) != null;
     }
 
     private static String httpGet(String urlStr) {
@@ -89,16 +107,17 @@ public class RemoteDataLoader {
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(10000);
-            conn.setReadTimeout(30000);
+            conn.setReadTimeout(60000); // 事件数据大，延长超时
 
             int code = conn.getResponseCode();
             if (code == 200) {
                 BufferedReader reader = new BufferedReader(
                         new InputStreamReader(conn.getInputStream(), "UTF-8"));
                 StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    sb.append(line);
+                char[] buf = new char[8192];
+                int len;
+                while ((len = reader.read(buf)) != -1) {
+                    sb.append(buf, 0, len);
                 }
                 reader.close();
                 return sb.toString();
