@@ -2,6 +2,7 @@ package com.umaai.assistant;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -10,10 +11,9 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
-
 import com.umaai.assistant.service.FloatingWindowService;
 import com.umaai.assistant.service.HttpDataService;
+import com.umaai.assistant.service.RemoteDataLoader;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -42,7 +42,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 小黑板测试：请求 /test_board 推送模拟数据
+        // 小黑板测试
         Button btnTestFake = findViewById(R.id.btn_test_fake);
         btnTestFake.setOnClickListener(v -> {
             new Thread(() -> {
@@ -59,6 +59,9 @@ public class MainActivity extends Activity {
 
         Button btnTestHttp = findViewById(R.id.btn_test_http);
         btnTestHttp.setOnClickListener(v -> testHttpCommunication());
+
+        // 启动时加载数据
+        loadDataIfNeeded();
     }
 
     @Override
@@ -77,6 +80,27 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "需要悬浮窗权限", Toast.LENGTH_SHORT).show();
             }
         }
+    }
+
+    private void loadDataIfNeeded() {
+        if (RemoteDataLoader.isCached(this)) {
+            SharedPreferences prefs = getSharedPreferences(RemoteDataLoader.PREFS_NAME, MODE_PRIVATE);
+            tvStatus.setText("数据已缓存 ✓\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+            return;
+        }
+
+        tvStatus.setText("正在加载游戏数据...");
+        RemoteDataLoader.loadAll(this, success -> {
+            runOnUiThread(() -> {
+                if (success) {
+                    tvStatus.setText("数据加载成功 ✓\n813角色 / 8063事件 / 2008技能\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+                    Toast.makeText(this, "游戏数据加载完成", Toast.LENGTH_SHORT).show();
+                } else {
+                    tvStatus.setText("数据加载失败，使用离线模式\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+                    Toast.makeText(this, "数据加载失败，将使用离线模式", Toast.LENGTH_LONG).show();
+                }
+            });
+        });
     }
 
     private void startFloatingService() {
@@ -150,15 +174,8 @@ public class MainActivity extends Activity {
     }
 
     private void updateStatus() {
-        new Thread(() -> {
-            String status = httpGet("http://127.0.0.1:" + HttpDataService.PORT + "/status");
-            runOnUiThread(() -> {
-                if (status != null) {
-                    tvStatus.setText("HTTP服务: 在线\n127.0.0.1:" + HttpDataService.PORT);
-                } else {
-                    tvStatus.setText("HTTP服务: 未启动\n请先启动悬浮窗");
-                }
-            });
-        }).start();
+        if (RemoteDataLoader.isCached(this)) {
+            tvStatus.setText("数据已缓存 ✓\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+        }
     }
 }

@@ -92,6 +92,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private HookPoller hookPoller;
     private boolean hookOnline = false;
 
+    // 决策引擎
+    private GameAdvisor advisor;
+
     // 拖拽
     private int initialX, initialY;
     private float initialTouchX, initialTouchY;
@@ -115,6 +118,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         registerDataReceiver();
         startHttpServer();
 
+        advisor = new GameAdvisor(this);
         hookPoller = new HookPoller(this);
         hookPoller.start();
     }
@@ -166,6 +170,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         // 尝试JSON解析
         try {
             JSONObject json = new JSONObject(data);
+            // Hook数据过决策引擎，生成推荐
+            if (advisor != null && (json.has("speed") || json.has("stamina_stat") || json.has("power"))) {
+                json = advisor.advise(json);
+            }
             updateFromJson(json);
             return;
         } catch (JSONException e) {
