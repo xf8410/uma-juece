@@ -9,6 +9,8 @@ import android.provider.Settings;
 import android.widget.Button;
 import android.widget.Toast;
 
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
 import com.umaai.assistant.service.FloatingWindowService;
 
 public class MainActivity extends Activity {
@@ -19,7 +21,6 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 启动悬浮窗按钮
         Button btnStart = findViewById(R.id.btn_start_float);
         btnStart.setOnClickListener(v -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -27,18 +28,13 @@ public class MainActivity extends Activity {
                         Uri.parse("package:" + getPackageName()));
                 startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST);
             } else {
-                startService(new Intent(this, FloatingWindowService.class));
-                Toast.makeText(this, "悬浮窗已启动", Toast.LENGTH_SHORT).show();
+                startFloatingService();
             }
         });
 
-        // 测试按钮
         Button btnTest = findViewById(R.id.btn_test_fake);
         btnTest.setOnClickListener(v -> {
-            Intent intent = new Intent("com.umaai.assistant.FAKE_DATA");
-            intent.putExtra("fake_data", "速度+5，耐力+3，推荐训练: 速度");
-            sendBroadcast(intent);
-            Toast.makeText(this, "已发送测试数据", Toast.LENGTH_SHORT).show();
+            sendTestData("速度+5，耐力+3，推荐训练: 速度");
         });
     }
 
@@ -47,11 +43,27 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == OVERLAY_PERMISSION_REQUEST) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
-                startService(new Intent(this, FloatingWindowService.class));
-                Toast.makeText(this, "悬浮窗已启动", Toast.LENGTH_SHORT).show();
+                startFloatingService();
             } else {
                 Toast.makeText(this, "需要悬浮窗权限", Toast.LENGTH_SHORT).show();
             }
         }
+    }
+
+    private void startFloatingService() {
+        Intent intent = new Intent(this, FloatingWindowService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+        Toast.makeText(this, "悬浮窗已启动", Toast.LENGTH_SHORT).show();
+    }
+
+    private void sendTestData(String data) {
+        Intent intent = new Intent(FloatingWindowService.ACTION_DATA);
+        intent.putExtra(FloatingWindowService.EXTRA_DATA, data);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+        Toast.makeText(this, "已发送测试数据", Toast.LENGTH_SHORT).show();
     }
 }

@@ -8,36 +8,46 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.umaai.assistant.R;
 
 public class FloatingWindowService extends Service {
 
+    private static final String TAG = "UmaFloat";
     private static final String CHANNEL_ID = "floating_service_channel";
     private static final int NOTIFICATION_ID = 1001;
+    public static final String ACTION_DATA = "com.umaai.assistant.ACTION_DATA";
+    public static final String EXTRA_DATA = "data";
 
     private WindowManager windowManager;
     private View floatingView;
     private ImageView floatImage;
     private TextView tvRecommend;
-    private BroadcastReceiver fakeDataReceiver;
-    private Handler handler = new Handler(android.os.Looper.getMainLooper());
+    private BroadcastReceiver dataReceiver;
+    private Handler handler = new Handler(Looper.getMainLooper());
     private boolean isViewAdded = false;
     private WindowManager.LayoutParams params;
+
+    // 拖拽相关
+    private int initialX, initialY;
+    private float initialTouchX, initialTouchY;
+    private boolean isDragging = false;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -47,15 +57,21 @@ public class FloatingWindowService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.d(TAG, "onCreate");
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, createNotification());
-        Toast.makeText(this, "Service 启动", Toast.LENGTH_SHORT).show();
-        createFloatingView();
-        registerReceiver();
+
+        // 延迟创建浮窗，确保Service完全初始化
+        handler.postDelayed(this::createFloatingView, 300);
+
+        registerDataReceiver();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && intent.hasExtra(EXTRA_DATA)) {
+            updateText(intent.getStringExtra(EXTRA_DATA));
+        }
         return START_STICKY;
     }
 
@@ -67,7 +83,8 @@ public class FloatingWindowService extends Service {
                     NotificationManager.IMPORTANCE_LOW
             );
             channel.setDescription("保持悬浮窗运行");
-            NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            channel.setShowBadge(false);
+            NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
             }
@@ -77,15 +94,21 @@ public class FloatingWindowService extends Service {
     private Notification createNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("赛马娘助手")
-                .setContentText("悬浮窗正在运行...")
+                .setContentText("悬浮窗运行中")
                 .setSmallIcon(android.R.drawable.ic_menu_agenda)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
                 .build();
     }
 
     private void createFloatingView() {
         try {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+            if (windowManager == null) {
+                Log.e(TAG, "WindowManager is null");
+                return;
+            }
+
             floatingView = LayoutInflater.from(this).inflate(R.layout.floating_window, null);
             floatImage = floatingView.findViewById(R.id.float_image);
             tvRecommend = floatingView.findViewById(R.id.tv_recommend);
@@ -97,95 +120,119 @@ public class FloatingWindowService extends Service {
                 layoutFlag = WindowManager.LayoutParams.TYPE_PHONE;
             }
 
-            // 固定悬浮窗尺寸（适配120dp图片 + 文字区域）
-            // 120dp ≈ 360-480px 根据屏幕密度
-            android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
-            windowManager.getDefaultDisplay().getMetrics(dm);
-            int density = dm.densityDpi;
-            int dp120 = (int) (120 * (density / 160f));
-            int w = dp120 + 20;  // 图片宽度 + 边距
-            int h = dp120 + 60;  // 图片高度 + 文字区域
-
             params = new WindowManager.LayoutParams(
-                    w, h, layoutFlag,
-                    // 修复: 移除FLAG_LAYOUT_IN_SCREEN（导致闪回桌面的元凶）
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    layoutFlag,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                     PixelFormat.TRANSLUCENT
             );
-            // 修复: 使用TOP|START+偏移，避免CENTER覆盖全屏触发返回桌面
             params.gravity = Gravity.TOP | Gravity.START;
-            params.x = dm.widthPixels / 20;
-            params.y = dm.heightPixels / 10;
+            params.x = 50;
+            params.y = 200;
 
-            addViewWithRetry();
+            setupDrag();
+
+            windowManager.addView(floatingView, params);
+            isViewAdded = true;
+            Log.d(TAG, "Floating view added successfully");
+            if (tvRecommend != null) tvRecommend.setText("等待数据...");
+
         } catch (Exception e) {
-            Toast.makeText(this, "初始化失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Log.e(TAG, "createFloatingView failed: " + e.getMessage(), e);
+            // 重试一次
+            handler.postDelayed(() -> {
+                try {
+                    if (!isViewAdded && floatingView != null && floatingView.getParent() == null) {
+                        windowManager.addView(floatingView, params);
+                        isViewAdded = true;
+                        Log.d(TAG, "Floating view added on retry");
+                    }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Retry also failed: " + ex.getMessage(), ex);
+                }
+            }, 2000);
         }
     }
 
-    private void addViewWithRetry() {
-        handler.post(() -> {
-            try {
-                if (floatingView != null && floatingView.getParent() == null) {
-                    windowManager.addView(floatingView, params);
-                    isViewAdded = true;
-                    if (tvRecommend != null) tvRecommend.setText("等待数据...");
-                }
-            } catch (Exception e) {
-                // 延迟重试一次
-                handler.postDelayed(() -> {
-                    try {
-                        if (!isViewAdded && floatingView != null && floatingView.getParent() == null) {
-                            windowManager.addView(floatingView, params);
-                            isViewAdded = true;
-                            if (tvRecommend != null) tvRecommend.setText("等待数据...");
+    private void setupDrag() {
+        if (floatingView == null) return;
+
+        floatingView.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    initialX = params.x;
+                    initialY = params.y;
+                    initialTouchX = event.getRawX();
+                    initialTouchY = event.getRawY();
+                    isDragging = false;
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - initialTouchX;
+                    float dy = event.getRawY() - initialTouchY;
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                        isDragging = true;
+                        params.x = initialX + (int) dx;
+                        params.y = initialY + (int) dy;
+                        if (windowManager != null && floatingView != null) {
+                            windowManager.updateViewLayout(floatingView, params);
                         }
-                    } catch (Exception ex) {
-                        // 彻底放弃，但Service继续运行
                     }
-                }, 1000);
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                    if (!isDragging) {
+                        // 单击：折叠/展开
+                        v.performClick();
+                    }
+                    return true;
             }
+            return false;
         });
     }
 
-    private void registerReceiver() {
-        fakeDataReceiver = new BroadcastReceiver() {
+    private void registerDataReceiver() {
+        dataReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                String data = intent.getStringExtra("fake_data");
-                if (data != null && tvRecommend != null) {
-                    tvRecommend.setText(data);
-                }
+                String data = intent.getStringExtra(EXTRA_DATA);
+                updateText(data);
             }
         };
-        registerReceiver(fakeDataReceiver, new IntentFilter("com.umaai.assistant.FAKE_DATA"));
+        // 使用 LocalBroadcastManager，避免隐式广播崩溃（Android 12+）
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                dataReceiver, new IntentFilter(ACTION_DATA));
     }
 
-    private void startAutoUpdate() {
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
+    private void updateText(String data) {
+        if (data != null && tvRecommend != null) {
+            handler.post(() -> {
                 if (tvRecommend != null) {
-                    String text = tvRecommend.getText().toString();
-                    if (!text.startsWith("速度") && !text.startsWith("等待")) {
-                        tvRecommend.setText("运行中...");
-                    }
+                    tvRecommend.setText(data);
                 }
-                handler.postDelayed(this, 5000);
-            }
-        }, 5000);
-    }    @Override
+            });
+        }
+    }
+
+    @Override
     public void onDestroy() {
         super.onDestroy();
         if (floatingView != null && isViewAdded) {
             try {
                 windowManager.removeView(floatingView);
             } catch (Exception e) {
-                // ignore
+                Log.w(TAG, "removeView failed: " + e.getMessage());
             }
         }
-        if (fakeDataReceiver != null) {
-            try { unregisterReceiver(fakeDataReceiver); } catch (Exception e) { /* ignore */ }
+        if (dataReceiver != null) {
+            try {
+                LocalBroadcastManager.getInstance(this).unregisterReceiver(dataReceiver);
+            } catch (Exception e) {
+                Log.w(TAG, "unregisterReceiver failed: " + e.getMessage());
+            }
         }
         handler.removeCallbacksAndMessages(null);
     }
