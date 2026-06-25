@@ -1,28 +1,180 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/panel_root"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:background="#00000000">
+    android:orientation="vertical"
+    android:background="#E6000000"
+    android:padding="8dp"
+    android:minWidth="280dp">
 
-    <ImageView
-        android:id="@+id/float_image"
-        android:layout_width="120dp"
-        android:layout_height="120dp"
-        android:src="@drawable/float_char"
-        android:scaleType="fitCenter" />
+    <!-- 顶部：日期/总属性/体力/干劲 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
+        <TextView
+            android:id="@+id/tv_turn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#AAAAAA"
+            android:textSize="10sp"
+            android:text="---" />
+
+        <TextView
+            android:id="@+id/tv_total"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/tv_stamina"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#66CCFF"
+            android:textSize="10sp"
+            android:layout_marginStart="6dp"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/tv_motivation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFCC00"
+            android:textSize="10sp"
+            android:layout_marginStart="4dp"
+            android:text="" />
+    </LinearLayout>
+
+    <!-- 推荐 -->
     <TextView
         android:id="@+id/tv_recommend"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:background="#CC000000"
-        android:textColor="#FFFFFF"
+        android:textColor="#00FF88"
         android:textSize="11sp"
-        android:paddingLeft="8dp"
-        android:paddingRight="8dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:textStyle="bold"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
         android:text="等待数据..." />
 
-</FrameLayout>
+    <!-- 分隔线 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#333333"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="2dp" />
+
+    <!-- 五维属性表 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <!-- 速度 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="2dp">
+            <TextView android:id="@+id/tv_spd_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#4488FF" android:textSize="9sp" android:textStyle="bold" android:text="速"/>
+            <TextView android:id="@+id/tv_spd_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#4488FF" android:textSize="9sp" android:text="---"/>
+            <TextView android:id="@+id/tv_spd_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#6688CC" android:textSize="8sp" android:text=""/>
+        </LinearLayout>
+
+        <!-- 耐力 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="2dp">
+            <TextView android:id="@+id/tv_sta_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF4444" android:textSize="9sp" android:textStyle="bold" android:text="耐"/>
+            <TextView android:id="@+id/tv_sta_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF4444" android:textSize="9sp" android:text="---"/>
+            <TextView android:id="@+id/tv_sta_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CC6666" android:textSize="8sp" android:text=""/>
+        </LinearLayout>
+
+        <!-- 力量 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="2dp">
+            <TextView android:id="@+id/tv_pwr_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF8800" android:textSize="9sp" android:textStyle="bold" android:text="力"/>
+            <TextView android:id="@+id/tv_pwr_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF8800" android:textSize="9sp" android:text="---"/>
+            <TextView android:id="@+id/tv_pwr_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CC8844" android:textSize="8sp" android:text=""/>
+        </LinearLayout>
+
+        <!-- 根性 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="2dp">
+            <TextView android:id="@+id/tv_gut_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF66AA" android:textSize="9sp" android:textStyle="bold" android:text="根"/>
+            <TextView android:id="@+id/tv_gut_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF66AA" android:textSize="9sp" android:text="---"/>
+            <TextView android:id="@+id/tv_gut_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CC6688" android:textSize="8sp" android:text=""/>
+        </LinearLayout>
+
+        <!-- 智力 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="2dp">
+            <TextView android:id="@+id/tv_wit_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFDD00" android:textSize="9sp" android:textStyle="bold" android:text="智"/>
+            <TextView android:id="@+id/tv_wit_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFDD00" android:textSize="9sp" android:text="---"/>
+            <TextView android:id="@+id/tv_wit_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CCBB44" android:textSize="8sp" android:text=""/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 分隔线 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#333333"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="2dp" />
+
+    <!-- 底部：设施/Hook状态 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tv_facility"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#888888"
+            android:textSize="9sp"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/tv_hook_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#555555"
+            android:textSize="8sp"
+            android:text="Hook:---" />
+    </LinearLayout>
+
+</LinearLayout>

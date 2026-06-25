@@ -20,6 +20,7 @@ import fi.iki.elonen.NanoHTTPD;
  *   GET  /status    → JSON状态信息
  *   GET  /data?msg=xxx  → 推送数据到悬浮窗（方便浏览器测试）
  *   POST /data      → 推送JSON数据到悬浮窗
+ *   GET  /test_board → 推送小黑板测试数据
  */
 public class HttpDataService extends NanoHTTPD {
 
@@ -69,9 +70,12 @@ public class HttpDataService extends NanoHTTPD {
                     return newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED,
                             "text/plain", "Use GET or POST");
 
+                case "/test_board":
+                    return handleTestBoard();
+
                 default:
                     return newFixedLengthResponse(Response.Status.NOT_FOUND,
-                            "text/plain", "Not found. Try /status or /data");
+                            "text/plain", "Not found. Try /status, /data, /test_board");
             }
         } catch (Exception e) {
             Log.e(TAG, "serve error: " + e.getMessage(), e);
@@ -80,14 +84,12 @@ public class HttpDataService extends NanoHTTPD {
         }
     }
 
-    /**
-     * GET /status → 返回JSON状态信息
-     */
     private Response handleStatus(IHTTPSession session) {
         JSONObject status = new JSONObject();
         try {
             status.put("app", "uma-juece");
-            status.put("version", "1.1");
+            status.put("version", "1.3");
+            status.put("mode", "blackboard");
             status.put("http_port", PORT);
             status.put("hook_port", 18765);
             status.put("status", "running");
@@ -97,17 +99,15 @@ public class HttpDataService extends NanoHTTPD {
         return newFixedLengthResponse(Response.Status.OK, "application/json", status.toString());
     }
 
-    /**
-     * GET /data?msg=xxx → 浏览器直接测试推送数据
-     */
     private Response handleGetData(IHTTPSession session) {
         Map<String, String> params = session.getParms();
         String msg = params.get("msg");
 
         if (msg == null || msg.isEmpty()) {
             String html = "<html><body>"
-                    + "<h2>uma-juece 数据推送</h2>"
+                    + "<h2>uma-juece 小黑板数据推送</h2>"
                     + "<p>用法: /data?msg=你的消息</p>"
+                    + "<p><a href='/test_board'>推送小黑板测试数据</a></p>"
                     + "<form action='/data' method='get'>"
                     + "<input name='msg' placeholder='输入推送内容' size='40'>"
                     + "<button type='submit'>推送</button>"
@@ -130,9 +130,6 @@ public class HttpDataService extends NanoHTTPD {
         return newFixedLengthResponse(Response.Status.OK, "application/json", result.toString());
     }
 
-    /**
-     * POST /data → 接收JSON数据推送
-     */
     private Response handlePostData(IHTTPSession session) throws IOException, ResponseException {
         Map<String, String> body = new HashMap<>();
         session.parseBody(body);
@@ -143,11 +140,8 @@ public class HttpDataService extends NanoHTTPD {
         if (postData != null && !postData.isEmpty()) {
             try {
                 JSONObject json = new JSONObject(postData);
-                if (json.has("data")) {
-                    displayText = json.getString("data");
-                } else {
-                    displayText = formatGameData(json);
-                }
+                // 直接传JSON给FloatingWindowService解析
+                displayText = json.toString();
             } catch (JSONException e) {
                 displayText = postData;
             }
@@ -160,7 +154,7 @@ public class HttpDataService extends NanoHTTPD {
         JSONObject result = new JSONObject();
         try {
             result.put("ok", true);
-            result.put("received", displayText != null ? displayText : "empty");
+            result.put("received", displayText != null ? "json_parsed" : "empty");
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -168,32 +162,56 @@ public class HttpDataService extends NanoHTTPD {
     }
 
     /**
-     * 格式化游戏数据为可读文本
+     * 推送小黑板测试数据，模拟URA面板
      */
-    private String formatGameData(JSONObject json) throws JSONException {
-        StringBuilder sb = new StringBuilder();
-        if (json.has("recommend")) {
-            sb.append("推荐: ").append(json.getString("recommend"));
+    private Response handleTestBoard() {
+        JSONObject test = new JSONObject();
+        try {
+            test.put("turn", "Classic 1年");
+            test.put("total", 3248);
+            test.put("pt", 442);
+            test.put("stamina", 64);
+            test.put("max_stamina", 100);
+            test.put("motivation", "好調");
+            test.put("recommend", "耐力 SP訓練 4人/友情2/失敗率6%");
+
+            JSONObject spd = new JSONObject();
+            spd.put("current", 1050); spd.put("remain", 550); spd.put("gain", 99); spd.put("pt", 13);
+            test.put("speed", spd);
+
+            JSONObject sta = new JSONObject();
+            sta.put("current", 685); sta.put("remain", 915); sta.put("gain", 47); sta.put("pt", 18);
+            test.put("stamina_stat", sta);
+
+            JSONObject pwr = new JSONObject();
+            pwr.put("current", 959); pwr.put("remain", 641); pwr.put("gain", 1); pwr.put("pt", 0);
+            test.put("power", pwr);
+
+            JSONObject gut = new JSONObject();
+            gut.put("current", 554); gut.put("remain", 1046); gut.put("gain", 21); gut.put("pt", 7);
+            test.put("guts", gut);
+
+            JSONObject wit = new JSONObject();
+            wit.put("current", 543); wit.put("remain", 1057); wit.put("gain", 28); wit.put("pt", 9);
+            test.put("wisdom", wit);
+
+            test.put("facility", "2 5 4 4 3");
+        } catch (JSONException e) {
+            e.printStackTrace();
         }
-        if (json.has("speed")) {
-            if (sb.length() > 0) sb.append(" | ");
-            sb.append("速度+").append(json.getInt("speed"));
+
+        String jsonStr = test.toString();
+        if (dataListener != null) {
+            dataListener.onDataReceived(jsonStr);
         }
-        if (json.has("stamina")) {
-            if (sb.length() > 0) sb.append(" ");
-            sb.append("耐力+").append(json.getInt("stamina"));
+
+        JSONObject result = new JSONObject();
+        try {
+            result.put("ok", true);
+            result.put("action", "test_board_pushed");
+        } catch (JSONException e) {
+            e.printStackTrace();
         }
-        if (json.has("power")) {
-            if (sb.length() > 0) sb.append(" ");
-            sb.append("力量+").append(json.getInt("power"));
-        }
-        if (json.has("wisdom")) {
-            if (sb.length() > 0) sb.append(" ");
-            sb.append("智力+").append(json.getInt("wisdom"));
-        }
-        if (sb.length() == 0) {
-            sb.append(json.toString());
-        }
-        return sb.toString();
+        return newFixedLengthResponse(Response.Status.OK, "application/json", result.toString());
     }
 }
