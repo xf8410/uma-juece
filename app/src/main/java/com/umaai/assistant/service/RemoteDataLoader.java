@@ -31,8 +31,8 @@ import java.net.URL;
 public class RemoteDataLoader {
 
     private static final String TAG = "UmaData";
-    public static final String API1_BASE = "https://k3ftlokgmwsms.ok.kimi.link";
-    public static final String API2_BASE = "https://tpnuv7lzpyxyu.ok.kimi.link";
+    public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
+    // GitHub raw: 零成本永久可用，不依赖第三方托管
     public static final String PREFS_NAME = "uma_data";
     private static final int CACHE_VERSION = 2; // 升级版本号触发重新加载
 
@@ -51,12 +51,12 @@ public class RemoteDataLoader {
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 
             // API1: 小体积数据，直接拿JSON
-            boolean namesOk = loadAndCache(prefs, KEY_NAMES, API1_BASE + "/uma_names.json");
-            boolean skillsOk = loadAndCache(prefs, KEY_SKILLS, API1_BASE + "/uma_skills.json");
-            boolean factorsOk = loadAndCache(prefs, KEY_FACTORS, API1_BASE + "/uma_factors.json");
+            boolean namesOk = loadAndCache(prefs, KEY_NAMES, DATA_BASE + "/uma_names.json");
+            boolean skillsOk = loadAndCache(prefs, KEY_SKILLS, DATA_BASE + "/uma_skills.json");
+            boolean factorsOk = loadAndCache(prefs, KEY_FACTORS, DATA_BASE + "/uma_factors.json");
 
             // API2: 事件数据（含Values数组，~12MB）
-            boolean eventsOk = loadAndCache(prefs, KEY_EVENTS, API2_BASE + "/data/events.txt");
+            boolean eventsOk = loadAndCache(prefs, KEY_EVENTS, DATA_BASE + "/uma_events.json");
 
             if (namesOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
 
