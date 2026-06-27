@@ -475,6 +475,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     }
 
     /** 从 /summary 更新单个属性显示 */
+    // command_id → 该属性对应的主训练
+    private static final int[] CMD_ID_MAP = {101, 102, 105, 103, 106}; // Spd,Sta,Pwr,Gut,Wiz
+
     private void updateStatFromSummary(TextView tvVal, TextView tvGain,
                                         JSONObject stats, JSONArray trainings,
                                         String statKey, String gainKey,
@@ -492,9 +495,60 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
 
         tvVal.setText(String.valueOf(current));
+
+        // ★ 找到该属性对应的主训练，读取 failure_rate 和 heads
+        int cmdId = -1;
+        if ("Speed".equals(gainKey)) cmdId = 101;
+        else if ("Stamina".equals(gainKey)) cmdId = 102;
+        else if ("Power".equals(gainKey)) cmdId = 105;
+        else if ("Guts".equals(gainKey)) cmdId = 103;
+        else if ("Wiz".equals(gainKey)) cmdId = 106;
+
+        int failureRate = -1;
+        int heads = -1;
+        int shining = -1;
+        if (cmdId > 0) {
+            for (int i = 0; i < trainings.length(); i++) {
+                JSONObject tr = trainings.getJSONObject(i);
+                if (tr.optInt("command_id", -1) == cmdId) {
+                    failureRate = tr.optInt("failure_rate", -1);
+                    heads = tr.optInt("heads", -1);
+                    shining = tr.optInt("shining", -1);
+                    break;
+                }
+            }
+        }
+
+        // ★ 构建增益文本：+X ⚠N% ★H ★★S
+        StringBuilder gainText = new StringBuilder();
         if (totalGain > 0) {
-            tvGain.setText("+" + totalGain);
-            tvGain.setTextColor(brightColor);
+            gainText.append("+").append(totalGain);
+        }
+        // 失败率警告
+        if (failureRate > 0) {
+            gainText.append(" ⚠").append(failureRate).append("%");
+        }
+        // 友情训练标识（有训练伙伴时显示人数）
+        if (heads > 0) {
+            gainText.append(" ★").append(heads);
+        }
+        // 技能提示标识
+        if (shining > 0) {
+            gainText.append(" !!").append(shining);
+        }
+
+        if (gainText.length() > 0) {
+            tvGain.setText(gainText.toString());
+            // 失败率着色：高失败率用红色，低失败率用黄色，无失败率用原色
+            if (failureRate > 30) {
+                tvGain.setTextColor(0xFFFF4444); // 红
+            } else if (failureRate > 10) {
+                tvGain.setTextColor(0xFFFFAA00); // 橙
+            } else if (failureRate > 0) {
+                tvGain.setTextColor(0xFFCCCC44); // 黄
+            } else {
+                tvGain.setTextColor(brightColor);
+            }
         } else {
             tvGain.setText("");
             tvGain.setTextColor(dimColor);
