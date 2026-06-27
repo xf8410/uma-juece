@@ -232,14 +232,18 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
                 // 干劲
                 String mot = stats.getString("motivation");
-                // ★ 状态显示（生病等）
-                int charaState = stats.optInt("state", 0);
-                String stateStr = "";
-                if (charaState != 0) {
-                    stateStr = " ⚠病";
+                // ★ 状态显示（生病等）— 用 chara_effect_ids 判断
+                // state 字段在 WorkSingleModeCharaData 上不存在，已废弃
+                org.json.JSONArray effectIds = stats.optJSONArray("chara_effect_ids");
+                boolean hasBadCondition = false;
+                if (effectIds != null && effectIds.length() > 0) {
+                    // TODO: 需要根据 master data 判断哪些 effect id 是 Bad 类型
+                    // 暂时：不显示"病"，等有 master data 映射后再判断
+                    hasBadCondition = false;
                 }
+                String stateStr = hasBadCondition ? " ⚠病" : "";
                 tvMotivation.setText(mot + stateStr);
-                if (charaState != 0) {
+                if (hasBadCondition) {
                     tvMotivation.setTextColor(COLOR_STATE_SICK);
                 } else if (mot.contains("Best") || mot.contains("Good")) {
                     tvMotivation.setTextColor(0xFFFFCC00);

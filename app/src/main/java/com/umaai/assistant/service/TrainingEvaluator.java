@@ -145,7 +145,10 @@ public class TrainingEvaluator {
             int half = summary.optInt("half", 1);
             int turn = (month - 1) * 2 + half;
             int maxTurn = 12;
-            int state = stats.optInt("state", 0);
+            // ★ state 字段已废弃（WorkSingleModeCharaData 无此属性，返回垃圾值）
+            // 暂时跳过生病检测，等 chara_effect_ids master data 映射完成后恢复
+            // int state = stats.optInt("state", 0);
+            int state = 0;
 
             // 解析训练等级
             Map<Integer, Integer> trainLevels = parseTrainingLevels(summary.optJSONArray("training_levels"));
