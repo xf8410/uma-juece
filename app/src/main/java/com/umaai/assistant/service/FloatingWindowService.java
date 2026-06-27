@@ -420,34 +420,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-
-            // 体力惩罚
-            if (vital <= 25) {
-                score *= 0.2;
-            } else if (vital <= 45) {
-                score *= 0.6;
-            }
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestType = name.toLowerCase();
-                bestDetail = detail;
-            }
-        }
-
-        if (vital > 0 && vital <= 20) {
-            tvRecommend.setText("\u25B6 休息 (体力" + vital + "过低)");
-            tvRecommend.setTextColor(0xFFFF4444);
-        } else if (!bestType.isEmpty()) {
-            tvRecommend.setText("\u25B6 " + bestDetail.toString());
-            setRecommendColorByType(bestType);
-        } else {
-            tvRecommend.setText("\u25B6 等待训练数据...");
-            tvRecommend.setTextColor(COLOR_DEFAULT);
-        }
-    }
-    }
-
     // ======== HTTP服务器 ========
     private void startHttpServer() {
         try {
