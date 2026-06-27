@@ -145,10 +145,16 @@ public class TrainingEvaluator {
             int half = summary.optInt("half", 1);
             int turn = (month - 1) * 2 + half;
             int maxTurn = 12;
-            // ★ state 字段已废弃（WorkSingleModeCharaData 无此属性，返回垃圾值）
-            // 暂时跳过生病检测，等 chara_effect_ids master data 映射完成后恢复
-            // int state = stats.optInt("state", 0);
+            // ★ v3.14.2: 用 chara_effect_ids 判断生病（Bad effect IDs: 1-6）
+            // CharaEffectId enum: 1=夜鷹 2=怠け 3=肌荒れ 4=太り気 5=頭痛 6=練習下手
             int state = 0;
+            JSONArray effectIds = summary.optJSONArray("chara_effect_ids");
+            if (effectIds != null) {
+                for (int i = 0; i < effectIds.length(); i++) {
+                    int eid = effectIds.optInt(i, 0);
+                    if (eid >= 1 && eid <= 6) { state = 1; break; } // Bad effect → sick
+                }
+            }
 
             // 解析训练等级
             Map<Integer, Integer> trainLevels = parseTrainingLevels(summary.optJSONArray("training_levels"));
