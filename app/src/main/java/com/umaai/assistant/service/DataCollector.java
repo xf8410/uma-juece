@@ -53,6 +53,7 @@ public class DataCollector {
     // GitHub upload config
     private static final String GITHUB_REPO = "xf8410/uma-data";
     private static final String GITHUB_BRANCH = "main";
+    // 按剧本分目录：training_sessions/URA/, training_sessions/Aoharu/, ...
     private static final String GITHUB_PATH = "training_sessions";
     // Auto-configured upload token (split to avoid scanner)
     private static final String _TK_P1 = "ghp_WGCBGbCji6kcx";
@@ -123,8 +124,6 @@ public class DataCollector {
     public String getSessionId() {
         return sessionId;
     }
-
-
 
     // ========================================================================
     // 数据采集
@@ -462,8 +461,10 @@ public class DataCollector {
     private void uploadToGitHub(String jsonContent) {
         new Thread(() -> {
             try {
+                // 按剧本分目录：training_sessions/{scenario}/{sessionId}.json
+                String scenarioDir = (scenario != null && !scenario.isEmpty()) ? scenario : "Unknown";
                 String filename = sessionId + ".json";
-                String path = GITHUB_PATH + "/" + filename;
+                String path = GITHUB_PATH + "/" + scenarioDir + "/" + filename;
                 String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
 
                 // Base64 encode content
@@ -472,7 +473,7 @@ public class DataCollector {
 
                 JSONObject body = new JSONObject();
                 body.put("message", "Add training session " + sessionId
-                    + " (" + turns.size() + " turns, " + scenario + ")");
+                    + " (" + turns.size() + " turns, " + scenarioDir + ")");
                 body.put("content", encoded);
                 body.put("branch", GITHUB_BRANCH);
 

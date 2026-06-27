@@ -43,6 +43,28 @@ public class TrainingEvaluator {
 
     /** クライマックス偏好 — Pt更值钱 */
     private static final double[] TRAIN_TYPE_BONUS_CLIMAX = {20.0, 10.0, 30.0, 30.0, 25.0};
+    /** アオハル杯偏好 — 团队羁绊更重要 */
+    private static final double[] TRAIN_TYPE_BONUS_AOHARU = {20.0, 15.0, 25.0, 25.0, 20.0};
+    /** グランドライブ偏好 — 偶像杯 */
+    private static final double[] TRAIN_TYPE_BONUS_GRAND_DRIVE = {25.0, 10.0, 25.0, 25.0, 20.0};
+    /** グランドマスターズ偏好 — 女神杯 */
+    private static final double[] TRAIN_TYPE_BONUS_GRAND_MASTERS = {20.0, 15.0, 25.0, 25.0, 20.0};
+    /** L'Arc偏好 — 海外远征 */
+    private static final double[] TRAIN_TYPE_BONUS_LARC = {20.0, 15.0, 30.0, 25.0, 20.0};
+    /** UAF偏好 — 运动会 */
+    private static final double[] TRAIN_TYPE_BONUS_UAF = {25.0, 15.0, 25.0, 25.0, 20.0};
+    /** 豊食祭偏好 — 种田 */
+    private static final double[] TRAIN_TYPE_BONUS_HARVEST = {20.0, 10.0, 30.0, 30.0, 20.0};
+    /** メカ偏好 — 赛博 */
+    private static final double[] TRAIN_TYPE_BONUS_MECHA = {25.0, 15.0, 25.0, 20.0, 20.0};
+    /** Legends偏好 — 传奇 */
+    private static final double[] TRAIN_TYPE_BONUS_LEGENDS = {20.0, 15.0, 25.0, 25.0, 20.0};
+    /** 無人島偏好 */
+    private static final double[] TRAIN_TYPE_BONUS_DESERT = {25.0, 15.0, 25.0, 20.0, 20.0};
+    /** 温泉郷偏好 */
+    private static final double[] TRAIN_TYPE_BONUS_HOTSPRING = {25.0, 15.0, 25.0, 20.0, 20.0};
+    /** Dreams偏好 — 育马者杯 */
+    private static final double[] TRAIN_TYPE_BONUS_DREAMS = {25.0, 15.0, 25.0, 25.0, 20.0};
 
     /** 控属性预留空间因子 */
     private static final double RESERVE_STATUS_FACTOR = 40.0;
@@ -65,12 +87,20 @@ public class TrainingEvaluator {
     /** 彩圈加成系数 */
     private static final double SHINING_BONUS = 35.0;
 
-    /** 最终事件预估属性加成 (URA3=45 + 最终事件=30 + URA2=20 + URA1=20) */
-    private static final int FINAL_BONUS_URA = 115;
-    /** クライマックス最终加成较少 */
-    private static final int FINAL_BONUS_CLIMAX = 80;
-    /** トレセン軒最终加成 */
-    private static final int FINAL_BONUS_TRAINERS = 90;
+    /** 最终事件预估属性加成 — 各剧本差异 */
+    private static final int FINAL_BONUS_URA = 115;        // URA3=45+URA2=20+URA1=20+最终事件=30
+    private static final int FINAL_BONUS_AOHARU = 90;      // 青春杯
+    private static final int FINAL_BONUS_CLIMAX = 80;      // 巅峰杯
+    private static final int FINAL_BONUS_GRAND_DRIVE = 100; // 偶像杯
+    private static final int FINAL_BONUS_GRAND_MASTERS = 100; // 女神杯
+    private static final int FINAL_BONUS_LARC = 100;        // 凯旋门杯
+    private static final int FINAL_BONUS_UAF = 100;         // UAF运动会
+    private static final int FINAL_BONUS_HARVEST = 90;      // 种田杯
+    private static final int FINAL_BONUS_MECHA = 90;        // 赛博杯
+    private static final int FINAL_BONUS_LEGENDS = 100;     // 传奇杯
+    private static final int FINAL_BONUS_DESERT = 100;      // 无人岛杯
+    private static final int FINAL_BONUS_HOTSPRING = 100;   // 温泉杯
+    private static final int FINAL_BONUS_DREAMS = 120;      // 育马者杯（上限2500，加成最多）
     /** 默认 */
     private static final int FINAL_BONUS_DEFAULT = 80;
 
@@ -95,18 +125,37 @@ public class TrainingEvaluator {
 
     private double[] getTrainTypeBonus() {
         switch (scenario) {
-            case "Climax":
-                return TRAIN_TYPE_BONUS_CLIMAX;
-            default:
-                return TRAIN_TYPE_BONUS_DEFAULT;
+            case "Climax": return TRAIN_TYPE_BONUS_CLIMAX;
+            case "Aoharu": return TRAIN_TYPE_BONUS_AOHARU;
+            case "GrandDrive": return TRAIN_TYPE_BONUS_GRAND_DRIVE;
+            case "GrandMasters": return TRAIN_TYPE_BONUS_GRAND_MASTERS;
+            case "LArc": return TRAIN_TYPE_BONUS_LARC;
+            case "UAF": return TRAIN_TYPE_BONUS_UAF;
+            case "Harvest": return TRAIN_TYPE_BONUS_HARVEST;
+            case "Mecha": return TRAIN_TYPE_BONUS_MECHA;
+            case "Legends": return TRAIN_TYPE_BONUS_LEGENDS;
+            case "DesertIsland": return TRAIN_TYPE_BONUS_DESERT;
+            case "HotSpring": return TRAIN_TYPE_BONUS_HOTSPRING;
+            case "Dreams": return TRAIN_TYPE_BONUS_DREAMS;
+            default: return TRAIN_TYPE_BONUS_DEFAULT;
         }
     }
 
     private int getFinalBonus() {
         switch (scenario) {
             case "URA": return FINAL_BONUS_URA;
+            case "Aoharu": return FINAL_BONUS_AOHARU;
             case "Climax": return FINAL_BONUS_CLIMAX;
-            case "TrainersLegend": return FINAL_BONUS_TRAINERS;
+            case "GrandDrive": return FINAL_BONUS_GRAND_DRIVE;
+            case "GrandMasters": return FINAL_BONUS_GRAND_MASTERS;
+            case "LArc": return FINAL_BONUS_LARC;
+            case "UAF": return FINAL_BONUS_UAF;
+            case "Harvest": return FINAL_BONUS_HARVEST;
+            case "Mecha": return FINAL_BONUS_MECHA;
+            case "Legends": return FINAL_BONUS_LEGENDS;
+            case "DesertIsland": return FINAL_BONUS_DESERT;
+            case "HotSpring": return FINAL_BONUS_HOTSPRING;
+            case "Dreams": return FINAL_BONUS_DREAMS;
             default: return FINAL_BONUS_DEFAULT;
         }
     }
@@ -354,38 +403,59 @@ public class TrainingEvaluator {
         switch (scenario) {
             case "URA":
                 // URA: 青緑桃buff已在buff区域显示，这里暂无额外逻辑
-                // 后续可根据buff等级调整训练偏好
                 break;
 
-            case "TrainersLegend":
-                // トレセン軒: 拉面系统 — 外出收益较高（拉面=属性+心情）
-                // 智力训练权重降低（拉面提供Pt）
-                // TODO: 等6/29日dump后根据实际字段细化
+            case "Aoharu":
+                // 青春杯: 团队战，羁绊价值更高
+                int headsA = trData.optInt("heads", 0);
+                bonus += headsA * 5.0;
                 break;
 
             case "Climax":
-                // クライマックス: Pt更值钱，智力训练额外加成
+                // 巅峰杯: Pt更值钱，智力训练额外加成
                 if (trainIdx == 4) { // Wisdom
                     bonus += 10.0;
                 }
                 break;
 
-            case "Aoharu":
-                // アオハル杯: 团队战，羁绊价值更高
-                int heads = trData.optInt("heads", 0);
-                bonus += heads * 5.0;
-                break;
-
             case "GrandDrive":
-                // グランドライブ: 粉丝数机制，后期属性更重要
+                // 偶像杯: 粉丝数机制，演唱会系统
                 break;
 
             case "GrandMasters":
-                // グランドマスターズ: 道具系统
+                // 女神杯: 道具系统
                 break;
 
-            case "ProjectLala":
-                // プロジェクトララ: 歌唱力系统
+            case "LArc":
+                // 凯旋门杯: 海外远征机制
+                break;
+
+            case "UAF":
+                // UAF运动会: 运动会机制
+                break;
+
+            case "Harvest":
+                // 种田杯: 大丰食祭，根性和力量更值钱
+                break;
+
+            case "Mecha":
+                // 赛博杯: 发明系统
+                break;
+
+            case "Legends":
+                // 传奇杯: 导き系统
+                break;
+
+            case "DesertIsland":
+                // 无人岛杯: 设施建设，岛训练收益高
+                break;
+
+            case "HotSpring":
+                // 温泉杯: 源泉掘削+入浴券
+                break;
+
+            case "Dreams":
+                // 育马者杯: BC远征+DREAMS训练
                 break;
         }
         return bonus;

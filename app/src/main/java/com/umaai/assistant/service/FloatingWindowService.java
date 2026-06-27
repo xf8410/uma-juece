@@ -365,12 +365,18 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (id == null) return "";
         switch (id) {
             case "URA": return "URA";
-            case "TrainersLegend": return "トレセン";
-            case "Climax": return "クライマックス";
-            case "Aoharu": return "アオハル";
-            case "GrandDrive": return "グランドライブ";
-            case "GrandMasters": return "グランドマスターズ";
-            case "ProjectLala": return "プロジェクトララ";
+            case "Aoharu": return "青春杯";
+            case "Climax": return "巅峰杯";
+            case "GrandDrive": return "偶像杯";
+            case "GrandMasters": return "女神杯";
+            case "LArc": return "凯旋门杯";
+            case "UAF": return "UAF";
+            case "Harvest": return "种田杯";
+            case "Mecha": return "赛博杯";
+            case "Legends": return "传奇杯";
+            case "DesertIsland": return "无人岛杯";
+            case "HotSpring": return "温泉杯";
+            case "Dreams": return "育马者杯";
             default: return id;
         }
     }

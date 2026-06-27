@@ -30,24 +30,36 @@ public class MainActivity extends Activity {
     public static final String PREFS_NAME = "uma_juece_prefs";
     public static final String KEY_SCENARIO = "selected_scenario";
 
-    // 剧本列表：显示名 → 内部标识
+    // 剧本列表：中文显示名 → 内部标识（按实装顺序，共13个）
     public static final String[] SCENARIO_LABELS = {
         "URA",
-        "トレセン軒",
-        "クライマックス",
-        "アオハル杯",
-        "グランドライブ",
-        "グランドマスターズ",
-        "プロジェクトララ"
+        "青春杯",
+        "巅峰杯",
+        "偶像杯",
+        "女神杯",
+        "凯旋门杯",
+        "UAF运动会",
+        "种田杯",
+        "赛博杯",
+        "传奇杯",
+        "无人岛杯",
+        "温泉杯",
+        "育马者杯"
     };
     public static final String[] SCENARIO_IDS = {
         "URA",
-        "TrainersLegend",
-        "Climax",
         "Aoharu",
+        "Climax",
         "GrandDrive",
         "GrandMasters",
-        "ProjectLala"
+        "LArc",
+        "UAF",
+        "Harvest",
+        "Mecha",
+        "Legends",
+        "DesertIsland",
+        "HotSpring",
+        "Dreams"
     };
 
     private TextView tvStatus;
