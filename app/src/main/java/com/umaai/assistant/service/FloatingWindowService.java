@@ -61,6 +61,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private static final int COLOR_WIT_DIM = 0xFFCCBB44;
     private static final int COLOR_DEFAULT = 0xFF00FF88;
 
+    // 状态颜色
+    private static final int COLOR_STATE_SICK = 0xFFFF4444;
+    private static final int COLOR_STATE_WARN = 0xFFFFAA00;
+
     // Buff颜色
     private static final int COLOR_BUFF_AO = 0xFF66AAFF;    // 青
     private static final int COLOR_BUFF_MIDORI = 0xFF66FF88; // 緑
@@ -80,6 +84,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvSpdVal, tvSpdGain, tvStaVal, tvStaGain;
     private TextView tvPwrVal, tvPwrGain, tvGutVal, tvGutGain;
     private TextView tvWitVal, tvWitGain;
+    // 训练等级
+    private TextView tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv;
+    // 状态指示
+    private TextView tvState;
     // Buff
     private LinearLayout buffContainer;
     private TextView tvBuffAo, tvBuffMidori, tvBuffMomo;
@@ -213,8 +221,16 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
                 // 干劲
                 String mot = stats.getString("motivation");
-                tvMotivation.setText(mot);
-                if (mot.contains("Best") || mot.contains("Good")) {
+                // ★ 状态显示（生病等）
+                int charaState = stats.optInt("state", 0);
+                String stateStr = "";
+                if (charaState != 0) {
+                    stateStr = " ⚠病";
+                }
+                tvMotivation.setText(mot + stateStr);
+                if (charaState != 0) {
+                    tvMotivation.setTextColor(COLOR_STATE_SICK);
+                } else if (mot.contains("Best") || mot.contains("Good")) {
                     tvMotivation.setTextColor(0xFFFFCC00);
                 } else if (mot.contains("Normal")) {
                     tvMotivation.setTextColor(0xFFAAAAAA);
@@ -233,6 +249,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         "guts", "Guts", COLOR_GUT, COLOR_GUT_DIM);
                 updateStatFromSummary(tvWitVal, tvWitGain, stats, trainings,
                         "wiz", "Wiz", COLOR_WIT, COLOR_WIT_DIM);
+
+                // ★ 训练等级显示
+                JSONArray trainLevels = json.optJSONArray("training_levels");
+                updateTrainingLevels(trainLevels);
+
+                // ★ 羁绊概要（显示在设施栏）
+                JSONArray evaluation = json.optJSONArray("evaluation");
+                updateEvaluationInfo(evaluation);
 
                 // 推荐训练
                 // 使用评分引擎推荐训练
@@ -420,6 +444,70 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
+    // ======== 训练等级显示 ========
+    private void updateTrainingLevels(JSONArray trainingLevels) {
+        // command_id → trainIdx
+        java.util.Map<Integer, Integer> cmdMap = new java.util.HashMap<>();
+        cmdMap.put(101, 0); cmdMap.put(102, 1); cmdMap.put(103, 3);
+        cmdMap.put(105, 2); cmdMap.put(106, 4);
+
+        // 默认等级1
+        int[] levels = {1, 1, 1, 1, 1};
+        TextView[] lvViews = {tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv};
+
+        if (trainingLevels != null) {
+            try {
+                for (int i = 0; i < trainingLevels.length(); i++) {
+                    JSONObject tl = trainingLevels.getJSONObject(i);
+                    int cmdId = tl.optInt("command_id", 0);
+                    int lv = tl.optInt("level", 1);
+                    Integer idx = cmdMap.get(cmdId);
+                    if (idx != null && idx < levels.length) {
+                        levels[idx] = lv;
+                    }
+                }
+            } catch (JSONException e) {
+                Log.w(TAG, "trainingLevels parse error: " + e.getMessage());
+            }
+        }
+
+        for (int i = 0; i < lvViews.length; i++) {
+            if (lvViews[i] != null) {
+                if (levels[i] > 1) {
+                    lvViews[i].setText("Lv" + levels[i]);
+                    lvViews[i].setVisibility(View.VISIBLE);
+                } else {
+                    lvViews[i].setVisibility(View.GONE);
+                }
+            }
+        }
+    }
+
+    // ======== 羁绊概要 ========
+    private void updateEvaluationInfo(JSONArray evaluation) {
+        if (tvFacility == null || evaluation == null || evaluation.length() == 0) return;
+        try {
+            int maxEval = 0;
+            int appearCount = 0;
+            for (int i = 0; i < evaluation.length(); i++) {
+                JSONObject ev = evaluation.getJSONObject(i);
+                int eval = ev.optInt("evaluation", 0);
+                int isAppear = ev.optInt("is_appear", 0);
+                if (isAppear != 0 && eval > maxEval) {
+                    maxEval = eval;
+                }
+                if (isAppear != 0) appearCount++;
+            }
+            if (appearCount > 0) {
+                String existing = tvFacility.getText().toString();
+                String evalStr = "絆" + maxEval;
+                tvFacility.setText(existing.isEmpty() ? evalStr : existing + " " + evalStr);
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "evaluation parse error: " + e.getMessage());
+        }
+    }
+
     // ======== HTTP服务器 ========
     private void startHttpServer() {
         try {
@@ -507,6 +595,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvFacility = floatingView.findViewById(R.id.tv_facility);
             tvHookStatus = floatingView.findViewById(R.id.tv_hook_status);
 
+            // 训练等级视图
+            tvSpdLv = floatingView.findViewById(R.id.tv_spd_lv);
+            tvStaLv = floatingView.findViewById(R.id.tv_sta_lv);
+            tvPwrLv = floatingView.findViewById(R.id.tv_pwr_lv);
+            tvGutLv = floatingView.findViewById(R.id.tv_gut_lv);
+            tvWitLv = floatingView.findViewById(R.id.tv_wit_lv);
+            // 状态指示
+            tvState = floatingView.findViewById(R.id.tv_state);
             // Buff视图
             buffContainer = floatingView.findViewById(R.id.buff_container);
             tvBuffAo = floatingView.findViewById(R.id.tv_buff_ao);

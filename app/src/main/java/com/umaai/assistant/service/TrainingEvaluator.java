@@ -6,17 +6,22 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
- * 赛马娘训练评分引擎 — 基于umaai-rs手写逻辑的URA通用版
+ * 赛马娘训练评分引擎 v2 — 对应插件v3.13.0全字段版
  *
  * 核心评分维度：
  *   1. 属性收益（软上限约束 + 预留空间因子）
  *   2. 体力价值（分段评估）
  *   3. 失败率惩罚
  *   4. 彩圈加成
- *   5. 羁绊价值
- *   6. 没带卡惩罚
+ *   5. 羁绊价值（从evaluation数据计算）
+ *   6. 没带卡惩罚（从heads判断）
  *   7. 训练类型偏好
+ *   8. 训练等级加成（从training_levels数据）
+ *   9. 角色状态惩罚（生病等）
  *
  * 不含剧本专属逻辑（温泉挖掘/超回复/友人外出等），
  * 新剧本上线后再加对应分支。
@@ -65,12 +70,23 @@ public class TrainingEvaluator {
     /** 属性上限（游戏硬上限） */
     private static final int STATUS_CAP = 1200;
 
+    /** 训练等级加成因子（每级加成） */
+    private static final double TRAIN_LEVEL_BONUS = 8.0;
+
+    /** 病気/状态惩罚 */
+    private static final double STATE_PENALTY = -500.0;
+
     // ========================================================================
-    // 训练名称映射
+    // 训练名称映射 — 对齐插件v3.13.0输出格式
     // ========================================================================
 
+    /** 插件trainings[].name值（小写英文，用于匹配） */
     private static final String[] TRAIN_KEYS = {"speed", "stamina", "power", "guts", "wisdom"};
+
+    /** 浮窗显示标签 */
     private static final String[] TRAIN_LABELS = {"速", "耐", "力", "根", "智"};
+
+    /** 颜色 */
     private static final int[] TRAIN_COLORS = {
         0xFF4FC3F7,  // 速-青
         0xFF66BB6A,  // 耐-绿
@@ -78,6 +94,25 @@ public class TrainingEvaluator {
         0xFFFFA726,  // 根-橙
         0xFFAB47BC   // 智-紫
     };
+
+    /**
+     * 插件gains键名映射 — 插件输出PascalCase
+     * 插件输出: Speed/Stamina/Power/Guts/Wiz/HP/SkillPt/Motivation
+     * stats键: speed/stamina/power/guts/wiz/vital/skill_point (lowercase)
+     */
+    private static final String[] GAIN_STAT_KEYS = {"Speed", "Stamina", "Power", "Guts", "Wiz"};
+    private static final String GAIN_HP_KEY = "HP";
+    private static final String GAIN_PT_KEY = "SkillPt";
+
+    /** command_id → trainIdx 映射 (101=速,102=耐,103=根,105=力,106=智) */
+    private static final Map<Integer, Integer> CMD_TO_IDX = new HashMap<>();
+    static {
+        CMD_TO_IDX.put(101, 0); // Speed
+        CMD_TO_IDX.put(102, 1); // Stamina
+        CMD_TO_IDX.put(103, 3); // Guts
+        CMD_TO_IDX.put(105, 2); // Power
+        CMD_TO_IDX.put(106, 4); // Wisdom
+    }
 
     // ========================================================================
     // 评分结果
@@ -110,19 +145,28 @@ public class TrainingEvaluator {
             int half = summary.optInt("half", 1);
             int turn = (month - 1) * 2 + half;
             int maxTurn = 12;
+            int state = stats.optInt("state", 0);
+
+            // 解析训练等级
+            Map<Integer, Integer> trainLevels = parseTrainingLevels(summary.optJSONArray("training_levels"));
+
+            // 解析羁绊评价
+            double avgEvaluation = calcAvgEvaluation(summary.optJSONArray("evaluation"));
 
             double bestScore = Double.NEGATIVE_INFINITY;
             int bestIdx = -1;
             String bestDetail = "";
 
             for (int i = 0; i < 5; i++) {
-                double score = evaluateTraining(summary, stats, trainings, i, vital, maxVital, turn, maxTurn);
+                double score = evaluateTraining(summary, stats, trainings, i,
+                        vital, maxVital, turn, maxTurn, state,
+                        trainLevels, avgEvaluation);
                 result.allScores[i] = score;
 
                 if (score > bestScore) {
                     bestScore = score;
                     bestIdx = i;
-                    bestDetail = buildDetail(summary, trainings, i);
+                    bestDetail = buildDetail(summary, trainings, i, trainLevels);
                 }
             }
 
@@ -131,6 +175,16 @@ public class TrainingEvaluator {
                 result.bestType = "rest";
                 result.bestLabel = "休息";
                 result.bestDetail = "体力" + vital + "过低";
+                result.bestColor = 0xFFFF4444;
+                result.bestScore = 0;
+                return result;
+            }
+
+            // 生病时建议休息（但不强制）
+            if (state != 0 && bestScore < -300) {
+                result.bestType = "rest";
+                result.bestLabel = "休息";
+                result.bestDetail = "状态不佳建议休息";
                 result.bestColor = 0xFFFF4444;
                 result.bestScore = 0;
                 return result;
@@ -169,7 +223,9 @@ public class TrainingEvaluator {
     private double evaluateTraining(JSONObject summary, JSONObject stats,
                                      JSONArray trainings, int trainIdx,
                                      int vital, int maxVital,
-                                     int turn, int maxTurn) throws JSONException {
+                                     int turn, int maxTurn, int state,
+                                     Map<Integer, Integer> trainLevels,
+                                     double avgEvaluation) throws JSONException {
         double score = 0.0;
 
         JSONObject trData = getTrainingData(trainings, trainIdx);
@@ -177,9 +233,20 @@ public class TrainingEvaluator {
             return -500.0;
         }
 
+        // ★ is_enable检查：训练不可用时跳过
+        int isEnable = trData.optInt("is_enable", 1);
+        if (isEnable == 0) {
+            return -9999.0;
+        }
+
         JSONObject gains = trData.optJSONObject("gains");
         if (gains == null || gains.length() == 0) {
             return -500.0;
+        }
+
+        // --- 0. 角色状态惩罚（生病等） ---
+        if (state != 0) {
+            score += STATE_PENALTY;
         }
 
         // --- 1. 属性收益（软上限约束）---
@@ -191,19 +258,17 @@ public class TrainingEvaluator {
         currentStats[4] = stats.optInt("wisdom", 0);
 
         int[] gainStats = new int[5];
-        gainStats[0] = gains.optInt("speed", 0);
-        gainStats[1] = gains.optInt("stamina", 0);
-        gainStats[2] = gains.optInt("power", 0);
-        gainStats[3] = gains.optInt("guts", 0);
-        gainStats[4] = gains.optInt("wisdom", 0);
-        int ptGain = gains.optInt("skill_point", 0);
+        for (int i = 0; i < 5; i++) {
+            gainStats[i] = gains.optInt(GAIN_STAT_KEYS[i], 0);
+        }
+        int ptGain = gains.optInt(GAIN_PT_KEY, 0);
 
         score = calcStatusGain(currentStats, gainStats, ptGain, turn, maxTurn, trainIdx);
 
         // --- 2. 体力价值评估 ---
         double vitalFactor = calcVitalFactor(turn, maxTurn);
         double vitalBefore = vitalEvaluation(vital, maxVital);
-        int staminaCost = estimateStaminaCost(trainIdx, gains);
+        int staminaCost = readStaminaCost(gains);
         int vitalAfter = Math.min(maxVital, Math.max(0, vital - staminaCost));
         double vitalAfterValue = vitalEvaluation(vitalAfter, maxVital);
         score += vitalFactor * (vitalAfterValue - vitalBefore);
@@ -226,20 +291,27 @@ public class TrainingEvaluator {
 
         // --- 5. 羁绊价值 ---
         int heads = trData.optInt("heads", 0);
-        int friendHeads = trData.optInt("friend_heads", 0);
         if (heads > 0) {
             score += heads * JIBAN_VALUE;
-            score += friendHeads * 40.0;
+            // 用平均羁绊值加成（羁绊越高价值越大）
+            if (avgEvaluation > 0) {
+                score += heads * (avgEvaluation / 100.0) * 8.0;
+            }
         }
 
         // --- 6. 没带卡惩罚 ---
-        boolean hasCard = trData.optBoolean("has_card", true);
-        if (!hasCard) {
+        if (heads == 0) {
             score += -100.0;
         }
 
         // --- 7. 训练类型偏好 ---
         score += TRAIN_TYPE_BONUS[trainIdx];
+
+        // --- 8. 训练等级加成 ---
+        int level = getTrainLevel(trainLevels, trainIdx);
+        if (level > 1) {
+            score += (level - 1) * TRAIN_LEVEL_BONUS;
+        }
 
         return score;
     }
@@ -315,17 +387,79 @@ public class TrainingEvaluator {
         return VITAL_FACTOR_START + ((double) turn / maxTurn) * (VITAL_FACTOR_END - VITAL_FACTOR_START);
     }
 
-    private int estimateStaminaCost(int trainIdx, JSONObject gains) {
+    /**
+     * 从gains读取消耗体力 — 插件键名为"HP"，负值表示消耗
+     */
+    private int readStaminaCost(JSONObject gains) {
         if (gains != null) {
-            int vitalChange = gains.optInt("vital", 0);
-            if (vitalChange < 0) {
-                return -vitalChange;
+            int hpChange = gains.optInt(GAIN_HP_KEY, 0);
+            if (hpChange < 0) {
+                return -hpChange;
             }
         }
-        switch (trainIdx) {
-            case 0: case 1: case 2: case 3: return 22;
-            case 4: return 12;
-            default: return 20;
+        return 20; // fallback
+    }
+
+    // ========================================================================
+    // 新字段解析
+    // ========================================================================
+
+    /**
+     * 解析training_levels数组 → Map<command_id, level>
+     */
+    private Map<Integer, Integer> parseTrainingLevels(JSONArray trainingLevels) {
+        Map<Integer, Integer> map = new HashMap<>();
+        if (trainingLevels == null) return map;
+        try {
+            for (int i = 0; i < trainingLevels.length(); i++) {
+                JSONObject tl = trainingLevels.getJSONObject(i);
+                int cmdId = tl.optInt("command_id", 0);
+                int level = tl.optInt("level", 0);
+                if (cmdId > 0) {
+                    map.put(cmdId, level);
+                }
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "parseTrainingLevels error: " + e.getMessage());
+        }
+        return map;
+    }
+
+    /**
+     * 获取指定训练的等级
+     */
+    private int getTrainLevel(Map<Integer, Integer> trainLevels, int trainIdx) {
+        // trainIdx → command_id 反查
+        int cmdId = 0;
+        for (Map.Entry<Integer, Integer> e : CMD_TO_IDX.entrySet()) {
+            if (e.getValue() == trainIdx) {
+                cmdId = e.getKey();
+                break;
+            }
+        }
+        return trainLevels.getOrDefault(cmdId, 1);
+    }
+
+    /**
+     * 计算平均羁绊评价
+     */
+    private double calcAvgEvaluation(JSONArray evaluation) {
+        if (evaluation == null || evaluation.length() == 0) return 0;
+        try {
+            double sum = 0;
+            int count = 0;
+            for (int i = 0; i < evaluation.length(); i++) {
+                JSONObject ev = evaluation.getJSONObject(i);
+                int eval = ev.optInt("evaluation", 0);
+                int isAppear = ev.optInt("is_appear", 0);
+                if (isAppear != 0 && eval > 0) {
+                    sum += eval;
+                    count++;
+                }
+            }
+            return count > 0 ? sum / count : 0;
+        } catch (JSONException e) {
+            return 0;
         }
     }
 
@@ -350,19 +484,30 @@ public class TrainingEvaluator {
         return null;
     }
 
-    private String buildDetail(JSONObject summary, JSONArray trainings, int trainIdx) {
+    private String buildDetail(JSONObject summary, JSONArray trainings, int trainIdx,
+                               Map<Integer, Integer> trainLevels) {
         StringBuilder sb = new StringBuilder(TRAIN_LABELS[trainIdx]);
         JSONObject trData = getTrainingData(trainings, trainIdx);
         if (trData != null) {
+            // 训练等级
+            int level = getTrainLevel(trainLevels, trainIdx);
+            if (level > 1) {
+                sb.append("Lv").append(level);
+            }
+
             JSONObject gains = trData.optJSONObject("gains");
             if (gains != null) {
-                String[] gainKeys = {"speed", "stamina", "power", "guts", "wisdom", "skill_point"};
-                String[] gainLabels = {"速", "耐", "力", "根", "智", "Pt"};
+                String[] gainKeys = {"Speed", "Stamina", "Power", "Guts", "Wiz"};
+                String[] gainLabels = {"速", "耐", "力", "根", "智"};
                 for (int j = 0; j < gainKeys.length; j++) {
                     int v = gains.optInt(gainKeys[j], 0);
                     if (v > 0) {
                         sb.append(" ").append(gainLabels[j]).append("+").append(v);
                     }
+                }
+                int pt = gains.optInt(GAIN_PT_KEY, 0);
+                if (pt > 0) {
+                    sb.append(" Pt+").append(pt);
                 }
             }
             int fail = trData.optInt("failure_rate", 0);
@@ -372,6 +517,10 @@ public class TrainingEvaluator {
             int shining = trData.optInt("shining", 0);
             if (shining > 0) {
                 sb.append(" ★×").append(shining);
+            }
+            int heads = trData.optInt("heads", 0);
+            if (heads > 0) {
+                sb.append(" 頭").append(heads);
             }
         }
         return sb.toString();

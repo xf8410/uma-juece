@@ -50,6 +50,16 @@
             android:textSize="10sp"
             android:layout_marginStart="4dp"
             android:text="" />
+
+        <TextView
+            android:id="@+id/tv_state"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FF4444"
+            android:textSize="9sp"
+            android:layout_marginStart="4dp"
+            android:text=""
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- 推荐 -->
@@ -89,6 +99,7 @@
             <TextView android:id="@+id/tv_spd_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#4488FF" android:textSize="9sp" android:textStyle="bold" android:text="速"/>
             <TextView android:id="@+id/tv_spd_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#4488FF" android:textSize="9sp" android:text="---"/>
             <TextView android:id="@+id/tv_spd_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#6688CC" android:textSize="8sp" android:text=""/>
+            <TextView android:id="@+id/tv_spd_lv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#88AADD" android:textSize="7sp" android:text="" android:visibility="gone"/>
         </LinearLayout>
 
         <!-- 耐力 -->
@@ -102,6 +113,7 @@
             <TextView android:id="@+id/tv_sta_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF4444" android:textSize="9sp" android:textStyle="bold" android:text="耐"/>
             <TextView android:id="@+id/tv_sta_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF4444" android:textSize="9sp" android:text="---"/>
             <TextView android:id="@+id/tv_sta_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CC6666" android:textSize="8sp" android:text=""/>
+            <TextView android:id="@+id/tv_sta_lv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#DD8888" android:textSize="7sp" android:text="" android:visibility="gone"/>
         </LinearLayout>
 
         <!-- 力量 -->
@@ -115,6 +127,7 @@
             <TextView android:id="@+id/tv_pwr_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF8800" android:textSize="9sp" android:textStyle="bold" android:text="力"/>
             <TextView android:id="@+id/tv_pwr_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF8800" android:textSize="9sp" android:text="---"/>
             <TextView android:id="@+id/tv_pwr_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CC8844" android:textSize="8sp" android:text=""/>
+            <TextView android:id="@+id/tv_pwr_lv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#DDAA66" android:textSize="7sp" android:text="" android:visibility="gone"/>
         </LinearLayout>
 
         <!-- 根性 -->
@@ -128,6 +141,7 @@
             <TextView android:id="@+id/tv_gut_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF66AA" android:textSize="9sp" android:textStyle="bold" android:text="根"/>
             <TextView android:id="@+id/tv_gut_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FF66AA" android:textSize="9sp" android:text="---"/>
             <TextView android:id="@+id/tv_gut_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CC6688" android:textSize="8sp" android:text=""/>
+            <TextView android:id="@+id/tv_gut_lv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#DD88AA" android:textSize="7sp" android:text="" android:visibility="gone"/>
         </LinearLayout>
 
         <!-- 智力 -->
@@ -141,6 +155,7 @@
             <TextView android:id="@+id/tv_wit_label" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFDD00" android:textSize="9sp" android:textStyle="bold" android:text="智"/>
             <TextView android:id="@+id/tv_wit_val" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFDD00" android:textSize="9sp" android:text="---"/>
             <TextView android:id="@+id/tv_wit_gain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#CCBB44" android:textSize="8sp" android:text=""/>
+            <TextView android:id="@+id/tv_wit_lv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#DDCC66" android:textSize="7sp" android:text="" android:visibility="gone"/>
         </LinearLayout>
     </LinearLayout>
 
