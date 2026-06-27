@@ -92,6 +92,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv;
     // 状态指示
     private TextView tvState;
+    // AI评估详情
+    private TextView tvAiDetail;
     // Buff
     private LinearLayout buffContainer;
     private TextView tvBuffAo, tvBuffMidori, tvBuffMomo;
@@ -275,18 +277,25 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray evaluation = json.optJSONArray("evaluation");
                 updateEvaluationInfo(evaluation);
 
-                // 推荐训练
-                // 使用评分引擎推荐训练
-                TrainingEvaluator.EvalResult evalResult = evaluator.evaluate(json);
-                if ("rest".equals(evalResult.bestType)) {
-                    tvRecommend.setText("▶ 休息 (" + evalResult.bestDetail + ")");
-                    tvRecommend.setTextColor(0xFFFF4444);
-                } else if (!"unknown".equals(evalResult.bestType) && !"error".equals(evalResult.bestType)) {
-                    tvRecommend.setText("▶ " + evalResult.bestDetail);
-                    tvRecommend.setTextColor(evalResult.bestColor);
+                // 推荐训练 — 优先使用插件AI评估
+                JSONObject aiObj = json.optJSONObject("ai");
+                if (aiObj != null) {
+                    // ★ 插件端AI评估可用
+                    updateAiRecommendation(aiObj);
                 } else {
-                    tvRecommend.setText("▶ " + evalResult.bestDetail);
-                    tvRecommend.setTextColor(COLOR_DEFAULT);
+                    // 回退到App端评分引擎
+                    if (tvAiDetail != null) tvAiDetail.setVisibility(View.GONE);
+                    TrainingEvaluator.EvalResult evalResult = evaluator.evaluate(json);
+                    if ("rest".equals(evalResult.bestType)) {
+                        tvRecommend.setText("▶ 休息 (" + evalResult.bestDetail + ")");
+                        tvRecommend.setTextColor(0xFFFF4444);
+                    } else if (!"unknown".equals(evalResult.bestType) && !"error".equals(evalResult.bestType)) {
+                        tvRecommend.setText("▶ " + evalResult.bestDetail);
+                        tvRecommend.setTextColor(evalResult.bestColor);
+                    } else {
+                        tvRecommend.setText("▶ " + evalResult.bestDetail);
+                        tvRecommend.setTextColor(COLOR_DEFAULT);
+                    }
                 }
 
                 // ★ Buff显示 - 根据剧本分支
@@ -302,6 +311,100 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 Log.w(TAG, "Summary parse error: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * 解析插件AI评估结果并更新浮窗
+     * ai字段格式: {"score":8500,"total_stats":1800,"best":"Speed","best_v":350.5,
+     *             "train":{"Speed":350.5,"Stamina":120.3,...},"rest":-20.5,"outgoing":179.5}
+     */
+    private void updateAiRecommendation(JSONObject ai) {
+        try {
+            int score = ai.optInt("score", 0);
+            int totalStats = ai.optInt("total_stats", 0);
+            String best = ai.optString("best", "");
+            double bestV = ai.optDouble("best_v", 0);
+            JSONObject train = ai.optJSONObject("train");
+            double restV = ai.optDouble("rest", 0);
+            double outgoingV = ai.optDouble("outgoing", 0);
+
+            // 推荐行显示
+            String bestLabel = aiActionLabel(best);
+            if ("Rest".equals(best)) {
+                tvRecommend.setText("▶ AI:休息 評価" + score);
+                tvRecommend.setTextColor(0xFFFF4444);
+            } else if ("Outgoing".equals(best)) {
+                tvRecommend.setText("▶ AI:外出 評価" + score);
+                tvRecommend.setTextColor(0xFF66CCFF);
+            } else {
+                tvRecommend.setText("▶ AI:" + bestLabel + " 評価" + score);
+                tvRecommend.setTextColor(aiActionColor(best));
+            }
+
+            // AI详情行：各训练评估值 + 休息 + 外出
+            if (tvAiDetail != null) {
+                StringBuilder sb = new StringBuilder();
+                String[] trainKeys = {"Speed", "Stamina", "Power", "Guts", "Wisdom"};
+                String[] trainLabels = {"速", "耐", "力", "根", "智"};
+                if (train != null) {
+                    for (int i = 0; i < trainKeys.length; i++) {
+                        double v = train.optDouble(trainKeys[i], 0);
+                        if (i > 0) sb.append(" ");
+                        sb.append(trainLabels[i]).append(fmtAiVal(v));
+                    }
+                }
+                sb.append(" | 休").append(fmtAiVal(restV));
+                sb.append(" 外").append(fmtAiVal(outgoingV));
+                if (totalStats > 0) {
+                    sb.append(" 五維").append(totalStats);
+                }
+                tvAiDetail.setText(sb.toString());
+                tvAiDetail.setVisibility(View.VISIBLE);
+            }
+
+        } catch (Exception e) {
+            Log.w(TAG, "AI parse error: " + e.getMessage());
+            tvRecommend.setText("▶ AI解析エラー");
+            tvRecommend.setTextColor(0xFFFF4444);
+            if (tvAiDetail != null) tvAiDetail.setVisibility(View.GONE);
+        }
+    }
+
+    /** AI行动名→显示标签 */
+    private String aiActionLabel(String action) {
+        switch (action) {
+            case "Speed": return "速";
+            case "Stamina": return "耐";
+            case "Power": return "力";
+            case "Guts": return "根";
+            case "Wisdom": return "智";
+            case "Rest": return "休息";
+            case "Outgoing": return "外出";
+            default: return action;
+        }
+    }
+
+    /** AI行动名→颜色 */
+    private int aiActionColor(String action) {
+        switch (action) {
+            case "Speed": return COLOR_SPD;
+            case "Stamina": return COLOR_STA;
+            case "Power": return COLOR_PWR;
+            case "Guts": return COLOR_GUT;
+            case "Wisdom": return COLOR_WIT;
+            case "Rest": return 0xFFFF4444;
+            case "Outgoing": return 0xFF66CCFF;
+            default: return COLOR_DEFAULT;
+        }
+    }
+
+    /** 格式化AI评估值（正数带+号，保留0或1位小数） */
+    private String fmtAiVal(double v) {
+        if (Math.abs(v) < 0.05) return "0";
+        if (v == Math.floor(v)) {
+            return (v >= 0 ? "+" : "") + (int) v;
+        }
+        return (v >= 0 ? "+" : "") + String.format("%.1f", v);
     }
 
     /**
@@ -769,6 +872,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvWitLv = floatingView.findViewById(R.id.tv_wit_lv);
             // 状态指示
             tvState = floatingView.findViewById(R.id.tv_state);
+            // AI评估详情
+            tvAiDetail = floatingView.findViewById(R.id.tv_ai_detail);
             // Buff视图
             buffContainer = floatingView.findViewById(R.id.buff_container);
             tvBuffAo = floatingView.findViewById(R.id.tv_buff_ao);
