@@ -234,12 +234,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 String mot = stats.getString("motivation");
                 // ★ 状态显示（生病等）— 用 chara_effect_ids 判断
                 // state 字段在 WorkSingleModeCharaData 上不存在，已废弃
-                org.json.JSONArray effectIds = stats.optJSONArray("chara_effect_ids");
+                org.json.JSONArray effectIds = json.optJSONArray("chara_effect_ids");
                 boolean hasBadCondition = false;
                 if (effectIds != null && effectIds.length() > 0) {
-                    // TODO: 需要根据 master data 判断哪些 effect id 是 Bad 类型
-                    // 暂时：不显示"病"，等有 master data 映射后再判断
-                    hasBadCondition = false;
+                    // ★ v3.14.2: Bad effect IDs 1-6 (夜鷹/怠け/肌荒れ/太り気/頭痛/練習下手)
+                    for (int ei = 0; ei < effectIds.length(); ei++) {
+                        int eid = effectIds.optInt(ei, 0);
+                        if (eid >= 1 && eid <= 6) { hasBadCondition = true; break; }
+                    }
                 }
                 String stateStr = hasBadCondition ? " ⚠病" : "";
                 tvMotivation.setText(mot + stateStr);
@@ -321,7 +323,15 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         try {
             // 根据剧本名称走不同显示逻辑
-            if ("Breeders".equals(currentScenario)) {
+            // ★ v3.14.2: Use Breeders display only when buff type is "Breeders"
+            boolean hasBreedersBuff = false;
+            for (int i = 0; i < buffs.length(); i++) {
+                if ("Breeders".equals(buffs.getJSONObject(i).optString("type", ""))) {
+                    hasBreedersBuff = true;
+                    break;
+                }
+            }
+            if (hasBreedersBuff) {
                 // Breeders剧本：青・緑・桃三个buff
                 updateBreedersBuffs(buffs);
             } else {
@@ -391,38 +401,70 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      * 通用buff显示（新剧本等）
      */
     private void updateGenericBuffs(JSONArray buffs) throws JSONException {
-        // 前3个buff放到三列
-        if (tvBuffAo != null && buffs.length() > 0) {
-            JSONObject b0 = buffs.getJSONObject(0);
-            tvBuffAo.setText(b0.getString("name") + "Lv" + b0.getInt("level"));
-            tvBuffAo.setTextColor(0xFF66AAFF);
-        }
-        if (tvBuffMidori != null && buffs.length() > 1) {
-            JSONObject b1 = buffs.getJSONObject(1);
-            tvBuffMidori.setText(b1.getString("name") + "Lv" + b1.getInt("level"));
-            tvBuffMidori.setTextColor(0xFF66FF88);
-        } else if (tvBuffMidori != null) {
-            tvBuffMidori.setText("");
-        }
-        if (tvBuffMomo != null && buffs.length() > 2) {
-            JSONObject b2 = buffs.getJSONObject(2);
-            tvBuffMomo.setText(b2.getString("name") + "Lv" + b2.getInt("level"));
-            tvBuffMomo.setTextColor(0xFFFF88AA);
-        } else if (tvBuffMomo != null) {
-            tvBuffMomo.setText("");
+        // ★ v3.14.2: 分类显示 Good/Bad buff
+        // Good buff → 青列(蓝), Bad buff → 桃列(粉), 其他 → 緑列(绿)
+        // 最多显示前3个Good和前3个Bad
+        StringBuilder goodBuffs = new StringBuilder();
+        StringBuilder badBuffs = new StringBuilder();
+        StringBuilder otherBuffs = new StringBuilder();
+        StringBuilder detail = new StringBuilder();
+
+        for (int i = 0; i < buffs.length(); i++) {
+            JSONObject b = buffs.getJSONObject(i);
+            String name = b.getString("name");
+            int level = b.optInt("level", 0);
+            String type = b.optString("type", "");
+            String desc = b.optString("desc", "");
+
+            String label = level > 0 ? name + "Lv" + level : name;
+
+            if ("Good".equals(type)) {
+                if (goodBuffs.length() > 0) goodBuffs.append(" ");
+                goodBuffs.append(label);
+            } else if ("Bad".equals(type)) {
+                if (badBuffs.length() > 0) badBuffs.append(" ");
+                badBuffs.append(label);
+            } else {
+                if (otherBuffs.length() > 0) otherBuffs.append(" ");
+                otherBuffs.append(label);
+            }
+
+            if (!desc.isEmpty() && !desc.equals(name)) {
+                if (detail.length() > 0) detail.append(" ");
+                detail.append(name).append(":").append(desc);
+            }
         }
 
-        // 详情行：所有buff的desc
-        if (tvBuffDetail != null) {
-            StringBuilder detail = new StringBuilder();
-            for (int i = 0; i < buffs.length(); i++) {
-                JSONObject b = buffs.getJSONObject(i);
-                String desc = b.optString("desc", "");
-                if (!desc.isEmpty()) {
-                    if (detail.length() > 0) detail.append(" ");
-                    detail.append(b.getString("name")).append(":").append(desc);
-                }
+        // Good → 青列(蓝)
+        if (tvBuffAo != null) {
+            if (goodBuffs.length() > 0) {
+                tvBuffAo.setText(goodBuffs.toString());
+                tvBuffAo.setTextColor(COLOR_BUFF_AO);
+            } else {
+                tvBuffAo.setText("");
             }
+        }
+        // Other/Special → 緑列(绿)
+        if (tvBuffMidori != null) {
+            if (otherBuffs.length() > 0) {
+                tvBuffMidori.setText(otherBuffs.toString());
+                tvBuffMidori.setTextColor(COLOR_BUFF_MIDORI);
+            } else {
+                tvBuffMidori.setText("");
+            }
+        }
+        // Bad → 桃列(粉)
+        if (tvBuffMomo != null) {
+            if (badBuffs.length() > 0) {
+                tvBuffMomo.setText(badBuffs.toString());
+                tvBuffMomo.setTextColor(COLOR_BUFF_MOMO);
+            } else {
+                tvBuffMomo.setText("");
+            }
+        }
+
+        // 详情行
+        if (tvBuffDetail != null) {
             if (detail.length() > 0) {
                 tvBuffDetail.setText(detail.toString());
                 tvBuffDetail.setVisibility(View.VISIBLE);
