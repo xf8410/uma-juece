@@ -15,6 +15,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.umaai.assistant.service.DataCollector;
 import com.umaai.assistant.service.FloatingWindowService;
 import com.umaai.assistant.service.HttpDataService;
 import com.umaai.assistant.service.RemoteDataLoader;
@@ -50,6 +51,7 @@ public class MainActivity extends Activity {
     };
 
     private TextView tvStatus;
+    private TextView tvDataStatus;
     private Spinner spinnerScenario;
     private boolean spinnerInitialized = false;
 
@@ -132,6 +134,16 @@ public class MainActivity extends Activity {
             stopService(new Intent(this, FloatingWindowService.class));
             Toast.makeText(this, "悬浮窗已停止", Toast.LENGTH_SHORT).show();
             updateStatus();
+        });
+
+        // === 数据收集状态 ===
+        tvDataStatus = findViewById(R.id.tv_data_status);
+        Button btnUploadData = findViewById(R.id.btn_upload_data);
+        btnUploadData.setOnClickListener(v -> {
+            // 通知浮窗服务上传当前数据
+            Intent uploadIntent = new Intent(FloatingWindowService.ACTION_UPLOAD_DATA);
+            sendBroadcast(uploadIntent);
+            Toast.makeText(this, "上传请求已发送", Toast.LENGTH_SHORT).show();
         });
 
         // 启动时加载数据

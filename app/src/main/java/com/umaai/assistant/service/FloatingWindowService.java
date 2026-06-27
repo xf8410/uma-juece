@@ -55,6 +55,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public static final String ACTION_DATA = "com.umaai.assistant.ACTION_DATA";
     public static final String EXTRA_DATA = "data";
     public static final String ACTION_SCENARIO = "com.umaai.assistant.ACTION_SCENARIO";
+    public static final String ACTION_UPLOAD_DATA = "com.umaai.assistant.ACTION_UPLOAD_DATA";
 
     // 五维颜色
     private static final int COLOR_SPD = 0xFF4488FF;
@@ -129,6 +130,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     // 训练评分引擎
     private TrainingEvaluator evaluator = new TrainingEvaluator();
+    private DataCollector dataCollector;
 
     // 兜底轮询：5秒没收到push就主动去18765拉数据
     private static final long POLL_THRESHOLD_MS = 5000;
@@ -141,6 +143,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         return null;
     }
 
+    /** 供HttpDataService访问DataCollector */
+    public DataCollector getDataCollector() {
+        return dataCollector;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -151,6 +158,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         // 读取用户选择的剧本
         SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS_NAME, MODE_PRIVATE);
         selectedScenario = prefs.getString(MainActivity.KEY_SCENARIO, "URA");
+        dataCollector = new DataCollector(this);
 
         handler.postDelayed(this::createFloatingView, 300);
         registerDataReceiver();
@@ -221,6 +229,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray trainings = json.getJSONArray("trainings");
                 JSONArray buffs = json.optJSONArray("buffs");
                 lastDataTime = System.currentTimeMillis();
+
+                // ★ 数据收集：记录回合快照
+                if (dataCollector != null) {
+                    String action = dataCollector.onSummaryData(json);
+                    // 更新收集状态显示
+                    int turnCount = dataCollector.getTurnCount();
+                    if (tvHookStatus != null) {
+                        tvHookStatus.setText("Push:ON 記録:" + turnCount);
+                        tvHookStatus.setTextColor(0xFF00FF88);
+                    }
+                }
 
                 // 记录当前剧本（来自插件推送）
                 currentScenario = json.optString("scenario", "");
@@ -991,18 +1010,34 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         scenarioReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                String scenario = intent.getStringExtra("scenario");
-                if (scenario != null) {
-                    selectedScenario = scenario;
-                    Log.d(TAG, "Scenario changed via broadcast: " + scenario);
-                    updateScenarioLabel();
-                    updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
+                String action = intent.getAction();
+                if (ACTION_SCENARIO.equals(action)) {
+                    String scenario = intent.getStringExtra("scenario");
+                    if (scenario != null) {
+                        selectedScenario = scenario;
+                        Log.d(TAG, "Scenario changed via broadcast: " + scenario);
+                        updateScenarioLabel();
+                        updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
+                    }
+                } else if (ACTION_UPLOAD_DATA.equals(action)) {
+                    // 手动上传当前育成数据
+                    if (dataCollector != null && dataCollector.getTurnCount() > 0) {
+                        Log.d(TAG, "Manual upload requested, turns: " + dataCollector.getTurnCount());
+                        dataCollector.finalizeAndUpload();
+                        Toast.makeText(FloatingWindowService.this,
+                            "データ " + dataCollector.getTurnCount() + "ターン分をアップロード中...",
+                            Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(FloatingWindowService.this,
+                            "アップロードするデータがありません", Toast.LENGTH_SHORT).show();
+                    }
                 }
             }
         };
-        // 用 LocalBroadcastManager 接收 MainActivity 的剧本切换广播
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 scenarioReceiver, new IntentFilter(ACTION_SCENARIO));
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                scenarioReceiver, new IntentFilter(ACTION_UPLOAD_DATA));
     }
 
     @Override
