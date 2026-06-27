@@ -105,6 +105,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvBuffAo, tvBuffMidori, tvBuffMomo;
     private TextView tvBuffDetail;
     private View buffSeparator;
+    // 队员（育马者杯）
+    private View teamContainer;
+    private TextView tvTeamLabel, tvTeamMembers, tvTeamRank, tvDreamTraining;
     // 底部
     private TextView tvFacility, tvHookStatus;
     // 剧本标签
@@ -337,6 +340,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // ★ Buff显示 - 根据剧本分支
                 updateBuffs(buffs);
 
+                // ★ 队员显示（育马者杯）
+                updateTeamMembers(json);
+
                 // 状态
                 if (tvHookStatus != null) {
                     tvHookStatus.setText("Push:ON");
@@ -466,6 +472,84 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             return (v >= 0 ? "+" : "") + (int) v;
         }
         return (v >= 0 ? "+" : "") + String.format("%.1f", v);
+    }
+
+    // ======== 育马者杯队员显示 ========
+
+    /** 等级数值→标签映射 (0=G, 1=F, 2=E, 3=D, 4=C, 5=B, 6=A, 7=S, 8=SS, 9=UG, 10=UF, 11=UA, 12=US) */
+    private static final String[] BREEDERS_LEVEL_LABELS = {
+        "G","F","E","D","C","B","A","S","SS","UG","UF","UA","US"
+    };
+
+    /** 等级数值→训练加成比例 */
+    private static final double[] BREEDERS_LEVEL_BONUS = {
+        0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.30, 0.30
+    };
+
+    private static String breedersLevelLabel(int level) {
+        if (level >= 0 && level < BREEDERS_LEVEL_LABELS.length) return BREEDERS_LEVEL_LABELS[level];
+        return "?";
+    }
+
+    /**
+     * 更新队员显示区域（育马者杯专用）
+     * 数据来自插件的 team_members 字段:
+     *   "team_members": [{"chara_id":X, "level":3, "dream_gauge":2, "is_burst":false}, ...]
+     *   "team_rank": 3, "dream_training_left": 2
+     */
+    private void updateTeamMembers(JSONObject json) {
+        String scenario = json.optString("scenario", "");
+        if (!"Dreams".equals(scenario)) {
+            if (teamContainer != null) teamContainer.setVisibility(View.GONE);
+            return;
+        }
+
+        // team_data is a nested object: {"team_members":[...], "team_rank":N, "dream_training_left":N}
+        JSONObject teamData = json.optJSONObject("team_data");
+        JSONArray members = teamData != null ? teamData.optJSONArray("team_members") : null;
+        if (members == null || members.length() == 0) {
+            if (teamContainer != null) teamContainer.setVisibility(View.GONE);
+            return;
+        }
+
+        if (teamContainer != null) teamContainer.setVisibility(View.VISIBLE);
+
+        // 构建队员字符串: "D★2 E★1 G★3!"
+        StringBuilder sb = new StringBuilder();
+        int minLevel = Integer.MAX_VALUE;
+        for (int i = 0; i < members.length(); i++) {
+            try {
+                JSONObject m = members.getJSONObject(i);
+                int level = m.optInt("level", 0);
+                int gauge = m.optInt("dream_gauge", 0);
+                boolean burst = m.optBoolean("is_burst", false);
+                if (level < minLevel) minLevel = level;
+                if (i > 0) sb.append(" ");
+                sb.append(breedersLevelLabel(level));
+                if (burst) {
+                    sb.append("★");  // 魂爆
+                } else if (gauge > 0) {
+                    sb.append("●".repeat(gauge));  // 梦想槽进度
+                }
+            } catch (JSONException e) { /* skip */ }
+        }
+
+        if (tvTeamMembers != null) tvTeamMembers.setText(sb.toString());
+
+        // 队伍等级 = 最低队员等级
+        if (tvTeamRank != null && minLevel < Integer.MAX_VALUE) {
+            tvTeamRank.setText("队伍" + breedersLevelLabel(minLevel));
+        }
+
+        // 梦想训练剩余次数
+        int dreamLeft = teamData != null ? teamData.optInt("dream_training_left", -1) : -1;
+        if (tvDreamTraining != null) {
+            if (dreamLeft >= 0) {
+                tvDreamTraining.setText("梦想×" + dreamLeft);
+            } else {
+                tvDreamTraining.setText("");
+            }
+        }
     }
 
     /**
@@ -908,6 +992,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvBuffMomo = floatingView.findViewById(R.id.tv_buff_momo);
             tvBuffDetail = floatingView.findViewById(R.id.tv_buff_detail);
             buffSeparator = floatingView.findViewById(R.id.buff_separator);
+            // 队员视图（育马者杯）
+            teamContainer = floatingView.findViewById(R.id.team_container);
+            tvTeamLabel = floatingView.findViewById(R.id.tv_team_label);
+            tvTeamMembers = floatingView.findViewById(R.id.tv_team_members);
+            tvTeamRank = floatingView.findViewById(R.id.tv_team_rank);
+            tvDreamTraining = floatingView.findViewById(R.id.tv_dream_training);
 
             // ★ 初始化剧本标签
             updateScenarioLabel();

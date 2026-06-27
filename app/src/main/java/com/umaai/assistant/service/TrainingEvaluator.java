@@ -455,7 +455,10 @@ public class TrainingEvaluator {
                 break;
 
             case "Dreams":
-                // 育马者杯: BC远征+DREAMS训练
+                // 育马者杯: 队员等级加成 + 魂爆加成
+                // 每个队员按等级提供10%-30%训练加成，魂爆+30%
+                // 队伍等级影响友情加成/得意率/启示事件率
+                bonus += dreamsBonus(trainIdx, summary, trData);
                 break;
         }
         return bonus;
@@ -653,5 +656,102 @@ public class TrainingEvaluator {
             }
         }
         return sb.toString();
+    }
+
+    // ========================================================================
+    // 育马者杯专属评分
+    // ========================================================================
+
+    /** 等级数值→训练加成比例 (0=G→12=US) */
+    private static final double[] BREEDERS_TRAIN_BONUS = {
+        0.10, 0.12, 0.14, 0.16, 0.18, 0.20, 0.22, 0.24, 0.26, 0.28, 0.30, 0.30, 0.30
+    };
+
+    /** 魂爆额外加成 */
+    private static final double BREEDERS_BURST_BONUS = 0.30;
+
+    /** 队伍等级→友情加成 */
+    private static final double[] BREEDERS_TEAM_FRIENDSHIP = {
+        0.0, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.50, 0.50, 0.50
+    };
+
+    /** 队伍等级→得意率加成 */
+    private static final double[] BREEDERS_TEAM_TOKUI = {
+        0.0, 0.0, 0.10, 0.20, 0.30, 0.40, 0.55, 0.70, 0.85, 1.00, 1.00, 1.00, 1.00
+    };
+
+    /**
+     * 育马者杯专属评分加成
+     * 核心机制：队员等级提供训练加成，魂爆额外+30%，队伍等级影响友情/得意率
+     *
+     * @param trainIdx 训练索引 0-4
+     * @param summary  完整summary JSON（含team_members）
+     * @param trData   当前训练数据
+     */
+    private double dreamsBonus(int trainIdx, JSONObject summary, JSONObject trData) {
+        double bonus = 0.0;
+        // team_data is nested: {"team_members":[...], "team_rank":N, "dream_training_left":N}
+        JSONObject teamData = summary.optJSONObject("team_data");
+        JSONArray members = teamData != null ? teamData.optJSONArray("team_members") : null;
+        if (members == null || members.length() == 0) {
+            // 无队员数据时，给默认低评分鼓励训练（积累梦想槽）
+            int heads = trData.optInt("heads", 0);
+            if (heads > 0) bonus += heads * 3.0;
+            return bonus;
+        }
+
+        // 1. 队员等级加成：每个队员提供10%-30%训练加成
+        double memberTrainBonus = 0.0;
+        int burstCount = 0;
+        int minLevel = Integer.MAX_VALUE;
+        for (int i = 0; i < members.length(); i++) {
+            try {
+                JSONObject m = members.getJSONObject(i);
+                int level = m.optInt("level", 0);
+                boolean burst = m.optBoolean("is_burst", false);
+                if (level >= 0 && level < BREEDERS_TRAIN_BONUS.length) {
+                    memberTrainBonus += BREEDERS_TRAIN_BONUS[level];
+                }
+                if (burst) burstCount++;
+                if (level < minLevel) minLevel = level;
+            } catch (JSONException e) { /* skip */ }
+        }
+
+        // 队员训练加成转换为评分（每个10%约等于+8分）
+        bonus += memberTrainBonus * 80.0;
+
+        // 2. 魂爆额外加成（每个魂爆队员+30%训练加成）
+        bonus += burstCount * BREEDERS_BURST_BONUS * 80.0;
+
+        // 3. 队伍等级影响（友情加成+得意率 → 有支援卡人头时更值钱）
+        if (minLevel < Integer.MAX_VALUE && minLevel >= 0 && minLevel < BREEDERS_TEAM_FRIENDSHIP.length) {
+            double friendshipBonus = BREEDERS_TEAM_FRIENDSHIP[minLevel];
+            double tokuiBonus = BREEDERS_TEAM_TOKUI[minLevel];
+            int heads = trData.optInt("heads", 0);
+            // 有人头时友情+得意率加成更明显
+            if (heads > 0) {
+                bonus += heads * friendshipBonus * 15.0;
+                bonus += tokuiBonus * 10.0;
+            }
+        }
+
+        // 4. 梦想训练提示：如果还有梦想训练次数，训练价值提升
+        int dreamLeft = teamData != null ? teamData.optInt("dream_training_left", 0) : 0;
+        if (dreamLeft > 0) {
+            // 梦想训练时固定5+3人头，训练收益大幅提升
+            // 但只有当前回合能触发梦想训练时才加
+            bonus += dreamLeft * 5.0;
+        }
+
+        // 5. 梦想槽未满的队员：鼓励选择人头多的训练来积攒梦想槽
+        // 同一训练上多人头 → 多个队员梦想槽同时+1
+        int heads = trData.optInt("heads", 0);
+        int shining = trData.optInt("shining", 0);
+        if (heads >= 2 && shining > 0) {
+            // 彩圈+多人头 = 快速积攒梦想槽的最佳机会
+            bonus += 15.0;
+        }
+
+        return bonus;
     }
 }
