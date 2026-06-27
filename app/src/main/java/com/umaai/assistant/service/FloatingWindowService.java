@@ -104,6 +104,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private BroadcastReceiver dataReceiver;
 
+    // 训练评分引擎
+    private TrainingEvaluator evaluator = new TrainingEvaluator();
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -232,7 +235,18 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         "wiz", "Wiz", COLOR_WIT, COLOR_WIT_DIM);
 
                 // 推荐训练
-                recommendFromTrainings(trainings, stats);
+                // 使用评分引擎推荐训练
+                TrainingEvaluator.EvalResult evalResult = evaluator.evaluate(json);
+                if ("rest".equals(evalResult.bestType)) {
+                    tvRecommend.setText("▶ 休息 (" + evalResult.bestDetail + ")");
+                    tvRecommend.setTextColor(0xFFFF4444);
+                } else if (!"unknown".equals(evalResult.bestType) && !"error".equals(evalResult.bestType)) {
+                    tvRecommend.setText("▶ " + evalResult.bestDetail);
+                    tvRecommend.setTextColor(evalResult.bestColor);
+                } else {
+                    tvRecommend.setText("▶ " + evalResult.bestDetail);
+                    tvRecommend.setTextColor(COLOR_DEFAULT);
+                }
 
                 // ★ Buff显示 - 根据剧本分支
                 updateBuffs(buffs);
@@ -406,30 +420,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /** 从 trainings 数组推荐最佳训练 */
-    private void recommendFromTrainings(JSONArray trainings, JSONObject stats) throws JSONException {
-        double bestScore = -1;
-        String bestType = "";
-        StringBuilder bestDetail = new StringBuilder();
-
-        int vital = stats.getInt("vital");
-
-        for (int i = 0; i < trainings.length(); i++) {
-            JSONObject tr = trainings.getJSONObject(i);
-            String name = tr.getString("name");
-            JSONObject gains = tr.optJSONObject("gains");
-            if (gains == null || gains.length() == 0) continue;
-
-            // 计算总增益分数
-            double score = 0;
-            StringBuilder detail = new StringBuilder(name);
-            Iterator<String> keys = gains.keys();
-            while (keys.hasNext()) {
-                String k = keys.next();
-                int v = gains.getInt(k);
-                score += v;
-                detail.append(" ").append(k).append("+").append(v);
-            }
 
             // 体力惩罚
             if (vital <= 25) {
@@ -456,16 +446,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvRecommend.setTextColor(COLOR_DEFAULT);
         }
     }
-
-    private void setRecommendColorByType(String type) {
-        switch (type) {
-            case "speed":       tvRecommend.setTextColor(COLOR_SPD); break;
-            case "stamina":     tvRecommend.setTextColor(COLOR_STA); break;
-            case "power":       tvRecommend.setTextColor(COLOR_PWR); break;
-            case "guts":        tvRecommend.setTextColor(COLOR_GUT); break;
-            case "wiz":         tvRecommend.setTextColor(COLOR_WIT); break;
-            default:            tvRecommend.setTextColor(COLOR_DEFAULT); break;
-        }
     }
 
     // ======== HTTP服务器 ========
