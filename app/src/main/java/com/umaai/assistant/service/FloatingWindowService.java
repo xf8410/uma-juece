@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
@@ -25,6 +26,7 @@ import android.widget.TextView;
 import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+import com.umaai.assistant.MainActivity;
 import com.umaai.assistant.R;
 
 import org.json.JSONArray;
@@ -38,8 +40,9 @@ import java.net.URL;
 import java.util.Iterator;
 
 /**
- * 小黑板风格浮窗服务 v1.7
+ * 小黑板风格浮窗服务 v1.14
  * 黑底+彩色文字，显示插件推送的 /summary 数据
+ * 支持剧本切换（Spinner选择+广播通知）
  * 支持剧本buff显示（青・緑・桃 / 新剧本适配）
  *
  * 数据来源：插件 v3.10.0+ 主动 POST /summary JSON 到 18766
@@ -51,6 +54,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private static final int NOTIFICATION_ID = 1001;
     public static final String ACTION_DATA = "com.umaai.assistant.ACTION_DATA";
     public static final String EXTRA_DATA = "data";
+    public static final String ACTION_SCENARIO = "com.umaai.assistant.ACTION_SCENARIO";
 
     // 五维颜色
     private static final int COLOR_SPD = 0xFF4488FF;
@@ -101,6 +105,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private View buffSeparator;
     // 底部
     private TextView tvFacility, tvHookStatus;
+    // 剧本标签
+    private TextView tvScenarioLabel;
 
     // HTTP服务
     private HttpDataService httpServer;
@@ -113,10 +119,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     // 数据更新时间
     private long lastDataTime = 0;
 
-    // 当前剧本
+    // 当前剧本（来自插件推送）
     private String currentScenario = "";
+    // 用户选择的剧本（来自Spinner）
+    private String selectedScenario = "URA";
 
     private BroadcastReceiver dataReceiver;
+    private BroadcastReceiver scenarioReceiver;
 
     // 训练评分引擎
     private TrainingEvaluator evaluator = new TrainingEvaluator();
@@ -139,8 +148,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, createNotification());
 
+        // 读取用户选择的剧本
+        SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS_NAME, MODE_PRIVATE);
+        selectedScenario = prefs.getString(MainActivity.KEY_SCENARIO, "URA");
+
         handler.postDelayed(this::createFloatingView, 300);
         registerDataReceiver();
+        registerScenarioReceiver();
         startHttpServer();
         startFallbackPoll();
     }
@@ -149,6 +163,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && intent.hasExtra(EXTRA_DATA)) {
             handleData(intent.getStringExtra(EXTRA_DATA));
+        }
+        // 从MainActivity传入剧本选择
+        if (intent != null && intent.hasExtra("scenario")) {
+            selectedScenario = intent.getStringExtra("scenario");
+            Log.d(TAG, "Scenario from intent: " + selectedScenario);
+            updateScenarioLabel();
         }
         return START_STICKY;
     }
@@ -202,7 +222,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray buffs = json.optJSONArray("buffs");
                 lastDataTime = System.currentTimeMillis();
 
-                // 记录当前剧本
+                // 记录当前剧本（来自插件推送）
                 currentScenario = json.optString("scenario", "");
 
                 // 回合信息
@@ -213,6 +233,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 } else {
                     tvTurn.setText(currentScenario.isEmpty() ? "---" : currentScenario);
                 }
+
+                // ★ 更新剧本标签
+                updateScenarioLabel();
 
                 // 総合 + Pt
                 int total = stats.getInt("speed") + stats.getInt("stamina")
@@ -235,11 +258,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // 干劲
                 String mot = stats.getString("motivation");
                 // ★ 状态显示（生病等）— 用 chara_effect_ids 判断
-                // state 字段在 WorkSingleModeCharaData 上不存在，已废弃
                 org.json.JSONArray effectIds = json.optJSONArray("chara_effect_ids");
                 boolean hasBadCondition = false;
                 if (effectIds != null && effectIds.length() > 0) {
-                    // ★ v3.14.2: Bad effect IDs 1-6 (夜鷹/怠け/肌荒れ/太り気/頭痛/練習下手)
                     for (int ei = 0; ei < effectIds.length(); ei++) {
                         int eid = effectIds.optInt(ei, 0);
                         if (eid >= 1 && eid <= 6) { hasBadCondition = true; break; }
@@ -280,11 +301,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // 推荐训练 — 优先使用插件AI评估
                 JSONObject aiObj = json.optJSONObject("ai");
                 if (aiObj != null) {
-                    // ★ 插件端AI评估可用
                     updateAiRecommendation(aiObj);
                 } else {
-                    // 回退到App端评分引擎
+                    // 回退到App端评分引擎（传入剧本信息）
                     if (tvAiDetail != null) tvAiDetail.setVisibility(View.GONE);
+                    evaluator.setScenario(selectedScenario);
                     TrainingEvaluator.EvalResult evalResult = evaluator.evaluate(json);
                     if ("rest".equals(evalResult.bestType)) {
                         tvRecommend.setText("▶ 休息 (" + evalResult.bestDetail + ")");
@@ -314,9 +335,33 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     }
 
     /**
+     * 更新剧本标签显示
+     * 优先用用户选择的剧本，插件推送的作为辅助显示
+     */
+    private void updateScenarioLabel() {
+        if (tvScenarioLabel == null) return;
+        String label = scenarioIdToLabel(selectedScenario);
+        tvScenarioLabel.setText(label);
+        tvScenarioLabel.setVisibility(View.VISIBLE);
+    }
+
+    /** 剧本ID → 显示名 */
+    private String scenarioIdToLabel(String id) {
+        if (id == null) return "";
+        switch (id) {
+            case "URA": return "URA";
+            case "TrainersLegend": return "トレセン";
+            case "Climax": return "クライマックス";
+            case "Aoharu": return "アオハル";
+            case "GrandDrive": return "グランドライブ";
+            case "GrandMasters": return "グランドマスターズ";
+            case "ProjectLala": return "プロジェクトララ";
+            default: return id;
+        }
+    }
+
+    /**
      * 解析插件AI评估结果并更新浮窗
-     * ai字段格式: {"score":8500,"total_stats":1800,"best":"Speed","best_v":350.5,
-     *             "train":{"Speed":350.5,"Stamina":120.3,...},"rest":-20.5,"outgoing":179.5}
      */
     private void updateAiRecommendation(JSONObject ai) {
         try {
@@ -328,7 +373,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             double restV = ai.optDouble("rest", 0);
             double outgoingV = ai.optDouble("outgoing", 0);
 
-            // 推荐行显示
             String bestLabel = aiActionLabel(best);
             if ("Rest".equals(best)) {
                 tvRecommend.setText("▶ AI:休息 評価" + score);
@@ -341,7 +385,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 tvRecommend.setTextColor(aiActionColor(best));
             }
 
-            // AI详情行：各训练评估值 + 休息 + 外出
             if (tvAiDetail != null) {
                 StringBuilder sb = new StringBuilder();
                 String[] trainKeys = {"Speed", "Stamina", "Power", "Guts", "Wisdom"};
@@ -370,7 +413,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /** AI行动名→显示标签 */
     private String aiActionLabel(String action) {
         switch (action) {
             case "Speed": return "速";
@@ -384,7 +426,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /** AI行动名→颜色 */
     private int aiActionColor(String action) {
         switch (action) {
             case "Speed": return COLOR_SPD;
@@ -398,7 +439,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /** 格式化AI评估值（正数带+号，保留0或1位小数） */
     private String fmtAiVal(double v) {
         if (Math.abs(v) < 0.05) return "0";
         if (v == Math.floor(v)) {
@@ -409,24 +449,19 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     /**
      * 更新Buff显示区域
-     * 根据scenario字段走不同显示逻辑
      */
     private void updateBuffs(JSONArray buffs) {
         if (buffs == null || buffs.length() == 0) {
-            // 无buff数据时隐藏buff区域
             if (buffContainer != null) buffContainer.setVisibility(View.GONE);
             if (tvBuffDetail != null) tvBuffDetail.setVisibility(View.GONE);
             if (buffSeparator != null) buffSeparator.setVisibility(View.GONE);
             return;
         }
 
-        // 显示buff区域
         if (buffContainer != null) buffContainer.setVisibility(View.VISIBLE);
         if (buffSeparator != null) buffSeparator.setVisibility(View.VISIBLE);
 
         try {
-            // 根据剧本名称走不同显示逻辑
-            // ★ v3.14.2: Use Breeders display only when buff type is "Breeders"
             boolean hasBreedersBuff = false;
             for (int i = 0; i < buffs.length(); i++) {
                 if ("Breeders".equals(buffs.getJSONObject(i).optString("type", ""))) {
@@ -435,10 +470,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (hasBreedersBuff) {
-                // Breeders剧本：青・緑・桃三个buff
                 updateBreedersBuffs(buffs);
             } else {
-                // 其他剧本：通用显示
                 updateGenericBuffs(buffs);
             }
         } catch (JSONException e) {
@@ -446,9 +479,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /**
-     * Breeders剧本buff显示：青・緑・桃
-     */
     private void updateBreedersBuffs(JSONArray buffs) throws JSONException {
         String aoLevel = "-", aoDesc = "";
         String midoriLevel = "-", midoriDesc = "";
@@ -485,7 +515,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvBuffMomo.setTextColor(COLOR_BUFF_MOMO);
         }
 
-        // 详情行
         if (tvBuffDetail != null) {
             StringBuilder detail = new StringBuilder();
             if (!aoDesc.isEmpty()) detail.append("青:").append(aoDesc).append(" ");
@@ -500,13 +529,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /**
-     * 通用buff显示（新剧本等）
-     */
     private void updateGenericBuffs(JSONArray buffs) throws JSONException {
-        // ★ v3.14.2: 分类显示 Good/Bad buff
-        // Good buff → 青列(蓝), Bad buff → 桃列(粉), 其他 → 緑列(绿)
-        // 最多显示前3个Good和前3个Bad
         StringBuilder goodBuffs = new StringBuilder();
         StringBuilder badBuffs = new StringBuilder();
         StringBuilder otherBuffs = new StringBuilder();
@@ -538,7 +561,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
-        // Good → 青列(蓝)
         if (tvBuffAo != null) {
             if (goodBuffs.length() > 0) {
                 tvBuffAo.setText(goodBuffs.toString());
@@ -547,7 +569,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 tvBuffAo.setText("");
             }
         }
-        // Other/Special → 緑列(绿)
         if (tvBuffMidori != null) {
             if (otherBuffs.length() > 0) {
                 tvBuffMidori.setText(otherBuffs.toString());
@@ -556,7 +577,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 tvBuffMidori.setText("");
             }
         }
-        // Bad → 桃列(粉)
         if (tvBuffMomo != null) {
             if (badBuffs.length() > 0) {
                 tvBuffMomo.setText(badBuffs.toString());
@@ -566,7 +586,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
-        // 详情行
         if (tvBuffDetail != null) {
             if (detail.length() > 0) {
                 tvBuffDetail.setText(detail.toString());
@@ -577,9 +596,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    /** 从 /summary 更新单个属性显示 */
-    // command_id → 该属性对应的主训练
-    private static final int[] CMD_ID_MAP = {101, 102, 105, 103, 106}; // Spd,Sta,Pwr,Gut,Wiz
+    private static final int[] CMD_ID_MAP = {101, 102, 105, 103, 106};
 
     private void updateStatFromSummary(TextView tvVal, TextView tvGain,
                                         JSONObject stats, JSONArray trainings,
@@ -587,7 +604,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                         int brightColor, int dimColor) throws JSONException {
         int current = stats.getInt(statKey);
 
-        // 汇总该属性在所有训练中的增益
         int totalGain = 0;
         for (int i = 0; i < trainings.length(); i++) {
             JSONObject tr = trainings.getJSONObject(i);
@@ -599,7 +615,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         tvVal.setText(String.valueOf(current));
 
-        // ★ 找到该属性对应的主训练，读取 failure_rate 和 heads
         int cmdId = -1;
         if ("Speed".equals(gainKey)) cmdId = 101;
         else if ("Stamina".equals(gainKey)) cmdId = 102;
@@ -622,33 +637,28 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
-        // ★ 构建增益文本：+X ⚠N% ★H ★★S
         StringBuilder gainText = new StringBuilder();
         if (totalGain > 0) {
             gainText.append("+").append(totalGain);
         }
-        // 失败率警告
         if (failureRate > 0) {
             gainText.append(" ⚠").append(failureRate).append("%");
         }
-        // 友情训练标识（有训练伙伴时显示人数）
         if (heads > 0) {
             gainText.append(" ★").append(heads);
         }
-        // 技能提示标识
         if (shining > 0) {
             gainText.append(" !!").append(shining);
         }
 
         if (gainText.length() > 0) {
             tvGain.setText(gainText.toString());
-            // 失败率着色：高失败率用红色，低失败率用黄色，无失败率用原色
             if (failureRate > 30) {
-                tvGain.setTextColor(0xFFFF4444); // 红
+                tvGain.setTextColor(0xFFFF4444);
             } else if (failureRate > 10) {
-                tvGain.setTextColor(0xFFFFAA00); // 橙
+                tvGain.setTextColor(0xFFFFAA00);
             } else if (failureRate > 0) {
-                tvGain.setTextColor(0xFFCCCC44); // 黄
+                tvGain.setTextColor(0xFFCCCC44);
             } else {
                 tvGain.setTextColor(brightColor);
             }
@@ -658,14 +668,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    // ======== 训练等级显示 ========
     private void updateTrainingLevels(JSONArray trainingLevels) {
-        // command_id → trainIdx
         java.util.Map<Integer, Integer> cmdMap = new java.util.HashMap<>();
         cmdMap.put(101, 0); cmdMap.put(102, 1); cmdMap.put(103, 3);
         cmdMap.put(105, 2); cmdMap.put(106, 4);
 
-        // 默认等级1
         int[] levels = {1, 1, 1, 1, 1};
         TextView[] lvViews = {tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv};
 
@@ -697,7 +704,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    // ======== 羁绊概要 ========
     private void updateEvaluationInfo(JSONArray evaluation) {
         if (tvFacility == null || evaluation == null || evaluation.length() == 0) return;
         try {
@@ -728,7 +734,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             httpServer = new HttpDataService(this);
             httpServer.startServer();
             Log.d(TAG, "HTTP server started on port " + HttpDataService.PORT);
-            updateNotification("HTTP:" + HttpDataService.PORT + " | 等待插件推送");
+            updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
         } catch (Exception e) {
             Log.e(TAG, "HTTP server start failed: " + e.getMessage(), e);
         }
@@ -742,11 +748,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     }
 
     // ======== 兜底轮询 ========
-    // 如果5秒没收到push数据，自动去插件18765/summary拉
     private void startFallbackPoll() {
         pollRunning = true;
         pollThread = new Thread(() -> {
-            // 等初始push 5秒
             try { Thread.sleep(POLL_THRESHOLD_MS); } catch (InterruptedException e) { return; }
             while (pollRunning) {
                 long elapsed = System.currentTimeMillis() - lastDataTime;
@@ -813,7 +817,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private Notification createNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("赛马娘助手")
-                .setContentText("HTTP:18766 | 等待插件推送")
+                .setContentText("HTTP:18766 | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送")
                 .setSmallIcon(android.R.drawable.ic_menu_agenda)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
@@ -863,6 +867,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvWitGain = floatingView.findViewById(R.id.tv_wit_gain);
             tvFacility = floatingView.findViewById(R.id.tv_facility);
             tvHookStatus = floatingView.findViewById(R.id.tv_hook_status);
+            // 剧本标签
+            tvScenarioLabel = floatingView.findViewById(R.id.tv_scenario_label);
 
             // 训练等级视图
             tvSpdLv = floatingView.findViewById(R.id.tv_spd_lv);
@@ -881,6 +887,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvBuffMomo = floatingView.findViewById(R.id.tv_buff_momo);
             tvBuffDetail = floatingView.findViewById(R.id.tv_buff_detail);
             buffSeparator = floatingView.findViewById(R.id.buff_separator);
+
+            // ★ 初始化剧本标签
+            updateScenarioLabel();
 
             int layoutFlag;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -906,7 +915,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             isViewAdded = true;
             Log.d(TAG, "Floating view added");
 
-            // 关闭按钮
             View btnClose = floatingView.findViewById(R.id.btn_close);
             if (btnClose != null) {
                 btnClose.setOnClickListener(v -> {
@@ -978,6 +986,25 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 dataReceiver, new IntentFilter(ACTION_DATA));
     }
 
+    /** 注册剧本切换广播接收器 */
+    private void registerScenarioReceiver() {
+        scenarioReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String scenario = intent.getStringExtra("scenario");
+                if (scenario != null) {
+                    selectedScenario = scenario;
+                    Log.d(TAG, "Scenario changed via broadcast: " + scenario);
+                    updateScenarioLabel();
+                    updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
+                }
+            }
+        };
+        // 用 LocalBroadcastManager 接收 MainActivity 的剧本切换广播
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                scenarioReceiver, new IntentFilter(ACTION_SCENARIO));
+    }
+
     @Override
     public void onDestroy() {
         super.onDestroy();
@@ -995,6 +1022,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 LocalBroadcastManager.getInstance(this).unregisterReceiver(dataReceiver);
             } catch (Exception e) {
                 Log.w(TAG, "unregisterReceiver failed: " + e.getMessage());
+            }
+        }
+        if (scenarioReceiver != null) {
+            try {
+                LocalBroadcastManager.getInstance(this).unregisterReceiver(scenarioReceiver);
+            } catch (Exception e) {
+                Log.w(TAG, "unregister scenarioReceiver failed: " + e.getMessage());
             }
         }
         handler.removeCallbacksAndMessages(null);

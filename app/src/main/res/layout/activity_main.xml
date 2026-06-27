@@ -16,14 +16,41 @@
         android:textSize="20sp"
         android:textStyle="bold" />
 
+    <!-- 剧本选择 -->
+    <LinearLayout
+        android:id="@+id/scenario_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/tv_title"
+        android:layout_marginTop="20dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="剧本："
+            android:textColor="#AAAAAA"
+            android:textSize="14sp" />
+
+        <Spinner
+            android:id="@+id/spinner_scenario"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="#2A2A2A"
+            android:popupBackground="#333333" />
+
+    </LinearLayout>
+
     <Button
         android:id="@+id/btn_start_float"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="启动悬浮窗"
-        android:layout_below="@+id/tv_title"
+        android:layout_below="@+id/scenario_row"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="30dp" />
+        android:layout_marginTop="16dp" />
 
     <Button
         android:id="@+id/btn_test_fake"
@@ -32,7 +59,7 @@
         android:text="小黑板测试"
         android:layout_below="@+id/btn_start_float"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="20dp" />
+        android:layout_marginTop="12dp" />
 
     <Button
         android:id="@+id/btn_test_http"
@@ -41,7 +68,7 @@
         android:text="测试HTTP通信"
         android:layout_below="@+id/btn_test_fake"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="20dp" />
+        android:layout_marginTop="12dp" />
 
     <Button
         android:id="@+id/btn_stop_float"
@@ -50,7 +77,7 @@
         android:text="停止悬浮窗"
         android:layout_below="@+id/btn_test_http"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="20dp" />
+        android:layout_marginTop="12dp" />
 
     <TextView
         android:id="@+id/tv_status"
@@ -58,7 +85,7 @@
         android:layout_height="wrap_content"
         android:layout_below="@+id/btn_stop_float"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="30dp"
+        android:layout_marginTop="20dp"
         android:textColor="#888888"
         android:textSize="14sp"
         android:text="HTTP服务: 未启动" />

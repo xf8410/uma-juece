@@ -7,7 +7,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -22,7 +26,32 @@ import java.net.URL;
 
 public class MainActivity extends Activity {
     private static final int OVERLAY_PERMISSION_REQUEST = 123;
+    public static final String PREFS_NAME = "uma_juece_prefs";
+    public static final String KEY_SCENARIO = "selected_scenario";
+
+    // 剧本列表：显示名 → 内部标识
+    public static final String[] SCENARIO_LABELS = {
+        "URA",
+        "トレセン軒",
+        "クライマックス",
+        "アオハル杯",
+        "グランドライブ",
+        "グランドマスターズ",
+        "プロジェクトララ"
+    };
+    public static final String[] SCENARIO_IDS = {
+        "URA",
+        "TrainersLegend",
+        "Climax",
+        "Aoharu",
+        "GrandDrive",
+        "GrandMasters",
+        "ProjectLala"
+    };
+
     private TextView tvStatus;
+    private Spinner spinnerScenario;
+    private boolean spinnerInitialized = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,6 +60,45 @@ public class MainActivity extends Activity {
 
         tvStatus = findViewById(R.id.tv_status);
 
+        // === 剧本选择 ===
+        spinnerScenario = findViewById(R.id.spinner_scenario);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, SCENARIO_LABELS);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerScenario.setAdapter(adapter);
+
+        // 恢复上次选择
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String savedScenario = prefs.getString(KEY_SCENARIO, "URA");
+        for (int i = 0; i < SCENARIO_IDS.length; i++) {
+            if (SCENARIO_IDS[i].equals(savedScenario)) {
+                spinnerScenario.setSelection(i);
+                break;
+            }
+        }
+
+        spinnerScenario.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                if (!spinnerInitialized) {
+                    spinnerInitialized = true;
+                    return;
+                }
+                String scenarioId = SCENARIO_IDS[pos];
+                prefs.edit().putString(KEY_SCENARIO, scenarioId).apply();
+                // 通知浮窗更新剧本
+                Intent intent = new Intent(FloatingWindowService.ACTION_SCENARIO);
+                intent.putExtra("scenario", scenarioId);
+                sendBroadcast(intent);
+                Toast.makeText(MainActivity.this,
+                        "剧本切换: " + SCENARIO_LABELS[pos], Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        // === 按钮 ===
         Button btnStart = findViewById(R.id.btn_start_float);
         btnStart.setOnClickListener(v -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -42,7 +110,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 小黑板测试
         Button btnTestFake = findViewById(R.id.btn_test_fake);
         btnTestFake.setOnClickListener(v -> {
             new Thread(() -> {
@@ -112,6 +179,8 @@ public class MainActivity extends Activity {
 
     private void startFloatingService() {
         Intent intent = new Intent(this, FloatingWindowService.class);
+        // 传入当前选择的剧本
+        intent.putExtra("scenario", getSelectedScenario());
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
         } else {
@@ -119,6 +188,11 @@ public class MainActivity extends Activity {
         }
         Toast.makeText(this, "小黑板已启动", Toast.LENGTH_SHORT).show();
         tvStatus.setText("HTTP服务: 127.0.0.1:" + HttpDataService.PORT);
+    }
+
+    public String getSelectedScenario() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return prefs.getString(KEY_SCENARIO, "URA");
     }
 
     private void testHttpCommunication() {

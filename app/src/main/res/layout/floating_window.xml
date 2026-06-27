@@ -8,7 +8,7 @@
     android:padding="8dp"
     android:minWidth="280dp">
 
-    <!-- 顶部：日期/总属性/体力/干劲 + 关闭按钮 -->
+    <!-- 顶部：日期/总属性/体力/干劲/剧本标签 + 关闭按钮 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -23,6 +23,17 @@
             android:textColor="#AAAAAA"
             android:textSize="10sp"
             android:text="---" />
+
+        <TextView
+            android:id="@+id/tv_scenario_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FF9900"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:layout_marginEnd="4dp"
+            android:text=""
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/btn_close"
@@ -229,7 +240,6 @@
             android:text="" />
     </LinearLayout>
 
-    <!-- Buff详情（点击展开） -->
     <TextView
         android:id="@+id/tv_buff_detail"
         android:layout_width="match_parent"
@@ -239,7 +249,6 @@
         android:visibility="gone"
         android:text="" />
 
-    <!-- 分隔线（buff下方） -->
     <View
         android:id="@+id/buff_separator"
         android:layout_width="match_parent"

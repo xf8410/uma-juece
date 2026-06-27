@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 赛马娘训练评分引擎 v2 — 对应插件v3.13.0全字段版
+ * 赛马娘训练评分引擎 v2.1 — 对应插件v3.15.3+全字段版
  *
  * 核心评分维度：
  *   1. 属性收益（软上限约束 + 预留空间因子）
@@ -22,9 +22,7 @@ import java.util.Map;
  *   7. 训练类型偏好
  *   8. 训练等级加成（从training_levels数据）
  *   9. 角色状态惩罚（生病等）
- *
- * 不含剧本专属逻辑（温泉挖掘/超回复/友人外出等），
- * 新剧本上线后再加对应分支。
+ *  10. 剧本专属逻辑（按scenario分支）
  */
 public class TrainingEvaluator {
 
@@ -40,8 +38,11 @@ public class TrainingEvaluator {
     /** 没带卡的属性权重 */
     private static final double ABSENT_WEIGHT = 2.0;
 
-    /** 训练类型偏好 [速训, 耐训, 力训, 根训, 智训] */
-    private static final double[] TRAIN_TYPE_BONUS = {20.0, 10.0, 30.0, 30.0, 20.0};
+    /** 训练类型偏好 [速训, 耐训, 力训, 根训, 智训] — URA默认 */
+    private static final double[] TRAIN_TYPE_BONUS_DEFAULT = {20.0, 10.0, 30.0, 30.0, 20.0};
+
+    /** クライマックス偏好 — Pt更值钱 */
+    private static final double[] TRAIN_TYPE_BONUS_CLIMAX = {20.0, 10.0, 30.0, 30.0, 25.0};
 
     /** 控属性预留空间因子 */
     private static final double RESERVE_STATUS_FACTOR = 40.0;
@@ -65,7 +66,13 @@ public class TrainingEvaluator {
     private static final double SHINING_BONUS = 35.0;
 
     /** 最终事件预估属性加成 (URA3=45 + 最终事件=30 + URA2=20 + URA1=20) */
-    private static final int FINAL_BONUS = 115;
+    private static final int FINAL_BONUS_URA = 115;
+    /** クライマックス最终加成较少 */
+    private static final int FINAL_BONUS_CLIMAX = 80;
+    /** トレセン軒最终加成 */
+    private static final int FINAL_BONUS_TRAINERS = 90;
+    /** 默认 */
+    private static final int FINAL_BONUS_DEFAULT = 80;
 
     /** 属性上限（游戏硬上限） */
     private static final int STATUS_CAP = 1200;
@@ -77,34 +84,48 @@ public class TrainingEvaluator {
     private static final double STATE_PENALTY = -500.0;
 
     // ========================================================================
+    // 剧本参数
+    // ========================================================================
+
+    private String scenario = "URA";
+
+    public void setScenario(String scenario) {
+        this.scenario = scenario != null ? scenario : "URA";
+    }
+
+    private double[] getTrainTypeBonus() {
+        switch (scenario) {
+            case "Climax":
+                return TRAIN_TYPE_BONUS_CLIMAX;
+            default:
+                return TRAIN_TYPE_BONUS_DEFAULT;
+        }
+    }
+
+    private int getFinalBonus() {
+        switch (scenario) {
+            case "URA": return FINAL_BONUS_URA;
+            case "Climax": return FINAL_BONUS_CLIMAX;
+            case "TrainersLegend": return FINAL_BONUS_TRAINERS;
+            default: return FINAL_BONUS_DEFAULT;
+        }
+    }
+
+    // ========================================================================
     // 训练名称映射 — 对齐插件v3.13.0输出格式
     // ========================================================================
 
-    /** 插件trainings[].name值（小写英文，用于匹配） */
     private static final String[] TRAIN_KEYS = {"speed", "stamina", "power", "guts", "wisdom"};
-
-    /** 浮窗显示标签 */
     private static final String[] TRAIN_LABELS = {"速", "耐", "力", "根", "智"};
 
-    /** 颜色 */
     private static final int[] TRAIN_COLORS = {
-        0xFF4FC3F7,  // 速-青
-        0xFF66BB6A,  // 耐-绿
-        0xFFEF5350,  // 力-赤
-        0xFFFFA726,  // 根-橙
-        0xFFAB47BC   // 智-紫
+        0xFF4FC3F7, 0xFF66BB6A, 0xFFEF5350, 0xFFFFA726, 0xFFAB47BC
     };
 
-    /**
-     * 插件gains键名映射 — 插件输出PascalCase
-     * 插件输出: Speed/Stamina/Power/Guts/Wiz/HP/SkillPt/Motivation
-     * stats键: speed/stamina/power/guts/wiz/vital/skill_point (lowercase)
-     */
     private static final String[] GAIN_STAT_KEYS = {"Speed", "Stamina", "Power", "Guts", "Wiz"};
     private static final String GAIN_HP_KEY = "HP";
     private static final String GAIN_PT_KEY = "SkillPt";
 
-    /** command_id → trainIdx 映射 (101=速,102=耐,103=根,105=力,106=智) */
     private static final Map<Integer, Integer> CMD_TO_IDX = new HashMap<>();
     static {
         CMD_TO_IDX.put(101, 0); // Speed
@@ -145,31 +166,28 @@ public class TrainingEvaluator {
             int half = summary.optInt("half", 1);
             int turn = (month - 1) * 2 + half;
             int maxTurn = 12;
-            // ★ v3.14.2: 用 chara_effect_ids 判断生病（Bad effect IDs: 1-6）
-            // CharaEffectId enum: 1=夜鷹 2=怠け 3=肌荒れ 4=太り気 5=頭痛 6=練習下手
             int state = 0;
             JSONArray effectIds = summary.optJSONArray("chara_effect_ids");
             if (effectIds != null) {
                 for (int i = 0; i < effectIds.length(); i++) {
                     int eid = effectIds.optInt(i, 0);
-                    if (eid >= 1 && eid <= 6) { state = 1; break; } // Bad effect → sick
+                    if (eid >= 1 && eid <= 6) { state = 1; break; }
                 }
             }
 
-            // 解析训练等级
             Map<Integer, Integer> trainLevels = parseTrainingLevels(summary.optJSONArray("training_levels"));
-
-            // 解析羁绊评价
             double avgEvaluation = calcAvgEvaluation(summary.optJSONArray("evaluation"));
 
             double bestScore = Double.NEGATIVE_INFINITY;
             int bestIdx = -1;
             String bestDetail = "";
 
+            double[] typeBonus = getTrainTypeBonus();
+
             for (int i = 0; i < 5; i++) {
                 double score = evaluateTraining(summary, stats, trainings, i,
                         vital, maxVital, turn, maxTurn, state,
-                        trainLevels, avgEvaluation);
+                        trainLevels, avgEvaluation, typeBonus);
                 result.allScores[i] = score;
 
                 if (score > bestScore) {
@@ -234,7 +252,8 @@ public class TrainingEvaluator {
                                      int vital, int maxVital,
                                      int turn, int maxTurn, int state,
                                      Map<Integer, Integer> trainLevels,
-                                     double avgEvaluation) throws JSONException {
+                                     double avgEvaluation,
+                                     double[] typeBonus) throws JSONException {
         double score = 0.0;
 
         JSONObject trData = getTrainingData(trainings, trainIdx);
@@ -242,7 +261,6 @@ public class TrainingEvaluator {
             return -500.0;
         }
 
-        // ★ is_enable检查：训练不可用时跳过
         int isEnable = trData.optInt("is_enable", 1);
         if (isEnable == 0) {
             return -9999.0;
@@ -302,7 +320,6 @@ public class TrainingEvaluator {
         int heads = trData.optInt("heads", 0);
         if (heads > 0) {
             score += heads * JIBAN_VALUE;
-            // 用平均羁绊值加成（羁绊越高价值越大）
             if (avgEvaluation > 0) {
                 score += heads * (avgEvaluation / 100.0) * 8.0;
             }
@@ -314,7 +331,7 @@ public class TrainingEvaluator {
         }
 
         // --- 7. 训练类型偏好 ---
-        score += TRAIN_TYPE_BONUS[trainIdx];
+        score += typeBonus[trainIdx];
 
         // --- 8. 训练等级加成 ---
         int level = getTrainLevel(trainLevels, trainIdx);
@@ -322,7 +339,56 @@ public class TrainingEvaluator {
             score += (level - 1) * TRAIN_LEVEL_BONUS;
         }
 
+        // --- ★ 10. 剧本专属逻辑 ---
+        score += scenarioBonus(trainIdx, summary, trData);
+
         return score;
+    }
+
+    /**
+     * 剧本专属加成
+     * 按不同剧本添加特殊评分逻辑
+     */
+    private double scenarioBonus(int trainIdx, JSONObject summary, JSONObject trData) {
+        double bonus = 0.0;
+        switch (scenario) {
+            case "URA":
+                // URA: 青緑桃buff已在buff区域显示，这里暂无额外逻辑
+                // 后续可根据buff等级调整训练偏好
+                break;
+
+            case "TrainersLegend":
+                // トレセン軒: 拉面系统 — 外出收益较高（拉面=属性+心情）
+                // 智力训练权重降低（拉面提供Pt）
+                // TODO: 等6/29日dump后根据实际字段细化
+                break;
+
+            case "Climax":
+                // クライマックス: Pt更值钱，智力训练额外加成
+                if (trainIdx == 4) { // Wisdom
+                    bonus += 10.0;
+                }
+                break;
+
+            case "Aoharu":
+                // アオハル杯: 团队战，羁绊价值更高
+                int heads = trData.optInt("heads", 0);
+                bonus += heads * 5.0;
+                break;
+
+            case "GrandDrive":
+                // グランドライブ: 粉丝数机制，后期属性更重要
+                break;
+
+            case "GrandMasters":
+                // グランドマスターズ: 道具系统
+                break;
+
+            case "ProjectLala":
+                // プロジェクトララ: 歌唱力系统
+                break;
+        }
+        return bonus;
     }
 
     // ========================================================================
@@ -335,11 +401,12 @@ public class TrainingEvaluator {
         double totalTurn = (double) maxTurn;
         double reserve = RESERVE_STATUS_FACTOR * remainTurn * (1.0 - remainTurn / (totalTurn * 2.0));
 
+        int finalBonus = getFinalBonus();
         double total = 0.0;
 
         for (int i = 0; i < 5; i++) {
             int limit = STATUS_CAP;
-            int remain = limit - currentStats[i] - FINAL_BONUS;
+            int remain = limit - currentStats[i] - finalBonus;
             int gain = gainStats[i];
 
             double s0 = statusSoftFunction(-remain, reserve);
@@ -360,9 +427,6 @@ public class TrainingEvaluator {
         return total;
     }
 
-    /**
-     * 属性上限软约束函数
-     */
     private double statusSoftFunction(double x, double reserve) {
         if (reserve <= 0.0) {
             return Math.min(x, 0.0);
@@ -396,9 +460,6 @@ public class TrainingEvaluator {
         return VITAL_FACTOR_START + ((double) turn / maxTurn) * (VITAL_FACTOR_END - VITAL_FACTOR_START);
     }
 
-    /**
-     * 从gains读取消耗体力 — 插件键名为"HP"，负值表示消耗
-     */
     private int readStaminaCost(JSONObject gains) {
         if (gains != null) {
             int hpChange = gains.optInt(GAIN_HP_KEY, 0);
@@ -406,16 +467,13 @@ public class TrainingEvaluator {
                 return -hpChange;
             }
         }
-        return 20; // fallback
+        return 20;
     }
 
     // ========================================================================
     // 新字段解析
     // ========================================================================
 
-    /**
-     * 解析training_levels数组 → Map<command_id, level>
-     */
     private Map<Integer, Integer> parseTrainingLevels(JSONArray trainingLevels) {
         Map<Integer, Integer> map = new HashMap<>();
         if (trainingLevels == null) return map;
@@ -434,11 +492,7 @@ public class TrainingEvaluator {
         return map;
     }
 
-    /**
-     * 获取指定训练的等级
-     */
     private int getTrainLevel(Map<Integer, Integer> trainLevels, int trainIdx) {
-        // trainIdx → command_id 反查
         int cmdId = 0;
         for (Map.Entry<Integer, Integer> e : CMD_TO_IDX.entrySet()) {
             if (e.getValue() == trainIdx) {
@@ -449,9 +503,6 @@ public class TrainingEvaluator {
         return trainLevels.getOrDefault(cmdId, 1);
     }
 
-    /**
-     * 计算平均羁绊评价
-     */
     private double calcAvgEvaluation(JSONArray evaluation) {
         if (evaluation == null || evaluation.length() == 0) return 0;
         try {
@@ -498,7 +549,6 @@ public class TrainingEvaluator {
         StringBuilder sb = new StringBuilder(TRAIN_LABELS[trainIdx]);
         JSONObject trData = getTrainingData(trainings, trainIdx);
         if (trData != null) {
-            // 训练等级
             int level = getTrainLevel(trainLevels, trainIdx);
             if (level > 1) {
                 sb.append("Lv").append(level);
