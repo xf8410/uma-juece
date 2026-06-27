@@ -88,7 +88,7 @@ public class HttpDataService extends NanoHTTPD {
         JSONObject status = new JSONObject();
         try {
             status.put("app", "uma-juece");
-            status.put("version", "1.3");
+            status.put("version", "1.6");
             status.put("mode", "blackboard");
             status.put("http_port", PORT);
             status.put("hook_port", 18765);

@@ -49,7 +49,7 @@ import org.json.JSONObject;
  *   "facility": "2 5 4 4 3"
  * }
  */
-public class FloatingWindowService extends Service implements HttpDataService.OnDataListener, HookPoller.OnDataListener {
+public class FloatingWindowService extends Service implements HttpDataService.OnDataListener {
 
     private static final String TAG = "UmaFloat";
     private static final String CHANNEL_ID = "floating_service_channel";
@@ -89,8 +89,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     // HTTP服务 + Hook轮询
     private HttpDataService httpServer;
-    private HookPoller hookPoller;
-    private boolean hookOnline = false;
 
     // 决策引擎
     private GameAdvisor advisor;
@@ -119,8 +117,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         startHttpServer();
 
         advisor = new GameAdvisor(this);
-        hookPoller = new HookPoller(this);
-        hookPoller.start();
     }
 
     @Override
@@ -136,30 +132,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public void onDataReceived(String data) {
         Log.d(TAG, "HTTP data received: " + data);
         handleData(data);
-    }
-
-    // ======== HookPoller.OnDataListener ========
-    @Override
-    public void onGameData(String data) {
-        Log.d(TAG, "Hook game data: " + data);
-        handleData(data);
-    }
-
-    @Override
-    public void onHookStatus(boolean online) {
-        if (online != hookOnline) {
-            hookOnline = online;
-            Log.d(TAG, "Hook status: " + (online ? "ONLINE" : "OFFLINE"));
-            handler.post(() -> {
-                if (tvHookStatus != null) {
-                    tvHookStatus.setText(online ? "Hook:ONLINE" : "Hook:---");
-                    tvHookStatus.setTextColor(online ? 0xFF00FF88 : 0xFF555555);
-                }
-                if (online && tvRecommend != null) {
-                    tvRecommend.setTextColor(COLOR_DEFAULT);
-                    tvRecommend.setText("已连接Hook，等待数据...");
-                }
-            });
+    });
         }
     }
 
@@ -167,10 +140,16 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private void handleData(String data) {
         if (data == null || data.isEmpty()) return;
 
-        // 尝试JSON解析
         try {
             JSONObject json = new JSONObject(data);
-            // Hook数据过决策引擎，生成推荐
+
+            // ★ v1.6: Detect /summary format from plugin push (v3.10.0+)
+            if (json.has("version") && json.has("stats") && json.has("trainings")) {
+                updateFromSummary(json);
+                return;
+            }
+
+            // Legacy format: Hook数据过决策引擎
             if (advisor != null && (json.has("speed") || json.has("stamina_stat") || json.has("power"))) {
                 json = advisor.advise(json);
             }
@@ -180,13 +159,163 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             // 不是JSON，当纯文本处理
         }
 
-        // 纯文本 → 显示在推荐区
         handler.post(() -> {
             if (tvRecommend != null) {
                 tvRecommend.setTextColor(COLOR_DEFAULT);
                 tvRecommend.setText(data);
             }
         });
+    }
+
+    /**
+     * ★ v1.6: 解析插件 /summary 格式JSON并更新浮窗
+     * 格式: {version, month, half, scenario, stats:{speed,stamina,power,guts,wiz,vital,max_vital,motivation,skill_point,fan}, trainings:[{name,gains:{Speed:X,SkillPt:Y}}]}
+     */
+    private void updateFromSummary(JSONObject json) {
+        handler.post(() -> {
+            try {
+                JSONObject stats = json.getJSONObject("stats");
+                JSONArray trainings = json.getJSONArray("trainings");
+
+                // 回合信息
+                int month = json.optInt("month", -1);
+                int half = json.optInt("half", -1);
+                if (month > 0) {
+                    tvTurn.setText(month + "月" + (half == 1 ? "前" : "後"));
+                } else {
+                    tvTurn.setText(json.optString("scenario", "---"));
+                }
+
+                // 総合 + Pt
+                int total = stats.getInt("speed") + stats.getInt("stamina") + stats.getInt("power") + stats.getInt("guts") + stats.getInt("wiz");
+                int pt = stats.getInt("skill_point");
+                tvTotal.setText("総" + total + " Pt" + pt);
+
+                // 体力
+                int vital = stats.getInt("vital");
+                int maxVital = stats.getInt("max_vital");
+                tvStamina.setText("体" + vital + "/" + maxVital);
+                if (vital <= 30) {
+                    tvStamina.setTextColor(0xFFFF4444);
+                } else if (vital <= 50) {
+                    tvStamina.setTextColor(0xFFFFAA00);
+                } else {
+                    tvStamina.setTextColor(0xFF66CCFF);
+                }
+
+                // 干劲
+                String mot = stats.getString("motivation");
+                tvMotivation.setText(mot);
+                if (mot.contains("Best") || mot.contains("Good")) {
+                    tvMotivation.setTextColor(0xFFFFCC00);
+                } else if (mot.contains("Normal")) {
+                    tvMotivation.setTextColor(0xFFAAAAAA);
+                } else {
+                    tvMotivation.setTextColor(0xFFFF4444);
+                }
+
+                // 五维属性 + 训练增益
+                updateStatFromSummary(tvSpdVal, tvSpdGain, stats, trainings, "speed", "Speed", COLOR_SPD, COLOR_SPD_DIM);
+                updateStatFromSummary(tvStaVal, tvStaGain, stats, trainings, "stamina", "Stamina", COLOR_STA, COLOR_STA_DIM);
+                updateStatFromSummary(tvPwrVal, tvPwrGain, stats, trainings, "power", "Power", COLOR_PWR, COLOR_PWR_DIM);
+                updateStatFromSummary(tvGutVal, tvGutGain, stats, trainings, "guts", "Guts", COLOR_GUT, COLOR_GUT_DIM);
+                updateStatFromSummary(tvWitVal, tvWitGain, stats, trainings, "wiz", "Wiz", COLOR_WIT, COLOR_WIT_DIM);
+
+                // ★ 推荐训练: 找总增益最高的训练
+                recommendFromTrainings(trainings, stats);
+
+                // Hook状态
+                if (tvHookStatus != null) {
+                    tvHookStatus.setText("Push:ON");
+                    tvHookStatus.setTextColor(0xFF00FF88);
+                }
+
+            } catch (JSONException e) {
+                Log.w(TAG, "Summary parse error: " + e.getMessage());
+            }
+        });
+    }
+
+    /** 从 /summary 格式更新单个属性显示 */
+    private void updateStatFromSummary(TextView tvVal, TextView tvGain,
+                                        JSONObject stats, JSONArray trainings,
+                                        String statKey, String gainKey,
+                                        int brightColor, int dimColor) throws JSONException {
+        int current = stats.getInt(statKey);
+
+        // 找该属性的训练增益
+        int totalGain = 0;
+        for (int i = 0; i < trainings.length(); i++) {
+            JSONObject tr = trainings.getJSONObject(i);
+            JSONObject gains = tr.optJSONObject("gains");
+            if (gains != null && gains.has(gainKey)) {
+                totalGain += gains.getInt(gainKey);
+            }
+        }
+
+        tvVal.setText(String.valueOf(current));
+        if (totalGain > 0) {
+            tvGain.setText("+" + totalGain);
+            tvGain.setTextColor(brightColor);
+        } else {
+            tvGain.setText("");
+            tvGain.setTextColor(dimColor);
+        }
+    }
+
+    /** 从 trainings 数组推荐最佳训练 */
+    private void recommendFromTrainings(JSONArray trainings, JSONObject stats) throws JSONException {
+        double bestScore = -1;
+        String bestName = "";
+        String bestType = "";
+        StringBuilder bestDetail = new StringBuilder();
+
+        int vital = stats.getInt("vital");
+        int maxVital = stats.getInt("max_vital");
+
+        for (int i = 0; i < trainings.length(); i++) {
+            JSONObject tr = trainings.getJSONObject(i);
+            String name = tr.getString("name");
+            JSONObject gains = tr.optJSONObject("gains");
+            if (gains == null || gains.length() == 0) continue;
+
+            // 计算总增益分数
+            double score = 0;
+            StringBuilder detail = new StringBuilder(name);
+            Iterator<String> keys = gains.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                int v = gains.getInt(k);
+                score += v;
+                detail.append(" ").append(k).append("+").append(v);
+            }
+
+            // 体力惩罚
+            if (vital <= 25) {
+                score *= 0.2;
+            } else if (vital <= 45) {
+                score *= 0.6;
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestName = name;
+                bestType = name.toLowerCase();
+                bestDetail = detail;
+            }
+        }
+
+        // 体力过低强制休息
+        if (vital > 0 && vital <= 20) {
+            tvRecommend.setText("▶ 休息 (体力" + vital + "过低)");
+            tvRecommend.setTextColor(0xFFFF4444);
+        } else if (!bestName.isEmpty()) {
+            tvRecommend.setText("▶ " + bestDetail.toString());
+            setRecommendColorByType(bestType);
+        } else {
+            tvRecommend.setText("▶ 等待训练数据...");
+            tvRecommend.setTextColor(COLOR_DEFAULT);
+        }
     }
 
     private void updateFromJson(JSONObject json) {
@@ -485,9 +614,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public void onDestroy() {
         super.onDestroy();
         stopHttpServer();
-        if (hookPoller != null) {
-            hookPoller.stop();
-        }
         if (floatingView != null && isViewAdded) {
             try {
                 windowManager.removeView(floatingView);
