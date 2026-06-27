@@ -143,11 +143,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         return null;
     }
 
-    /** 供HttpDataService访问DataCollector */
-    public DataCollector getDataCollector() {
-        return dataCollector;
-    }
-
     @Override
     public void onCreate() {
         super.onCreate();
@@ -1025,7 +1020,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         Log.d(TAG, "Manual upload requested, turns: " + dataCollector.getTurnCount());
                         dataCollector.finalizeAndUpload();
                         Toast.makeText(FloatingWindowService.this,
-                            "データ " + dataCollector.getTurnCount() + "ターン分をアップロード中...",
+                            dataCollector.getTurnCount() + "ターン分をアップロード中...",
                             Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(FloatingWindowService.this,

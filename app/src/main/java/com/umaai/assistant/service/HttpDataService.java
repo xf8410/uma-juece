@@ -199,23 +199,7 @@ public class HttpDataService extends NanoHTTPD {
                 "text/plain", "Empty body");
     }
 
-    /**
-     * 获取配置状态
-     * GET /config → {"has_github_token": true/false}
-     */
-    private Response handleConfigStatus() {
-        JSONObject status = new JSONObject();
-        try {
-            boolean hasToken = false;
-            if (dataListener instanceof FloatingWindowService) {
-                hasToken = ((FloatingWindowService) dataListener).getDataCollector().hasGitHubToken();
-            }
-            status.put("has_github_token", hasToken);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return newFixedLengthResponse(Response.Status.OK, "application/json", status.toString());
-    }
+
 
     /**
      * 推送小黑板测试数据，模拟URA面板
