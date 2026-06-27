@@ -43,11 +43,20 @@
         android:layout_centerHorizontal="true"
         android:layout_marginTop="20dp" />
 
+    <Button
+        android:id="@+id/btn_stop_float"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="停止悬浮窗"
+        android:layout_below="@+id/btn_test_http"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="20dp" />
+
     <TextView
         android:id="@+id/tv_status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/btn_test_http"
+        android:layout_below="@+id/btn_stop_float"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="30dp"
         android:textColor="#888888"

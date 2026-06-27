@@ -60,6 +60,13 @@ public class MainActivity extends Activity {
         Button btnTestHttp = findViewById(R.id.btn_test_http);
         btnTestHttp.setOnClickListener(v -> testHttpCommunication());
 
+        Button btnStopFloat = findViewById(R.id.btn_stop_float);
+        btnStopFloat.setOnClickListener(v -> {
+            stopService(new Intent(this, FloatingWindowService.class));
+            Toast.makeText(this, "悬浮窗已停止", Toast.LENGTH_SHORT).show();
+            updateStatus();
+        });
+
         // 启动时加载数据
         loadDataIfNeeded();
     }

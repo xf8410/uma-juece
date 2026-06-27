@@ -31,6 +31,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Iterator;
 
 /**
@@ -115,6 +119,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     // 训练评分引擎
     private TrainingEvaluator evaluator = new TrainingEvaluator();
 
+    // 兜底轮询：5秒没收到push就主动去18765拉数据
+    private static final long POLL_THRESHOLD_MS = 5000;
+    private static final long POLL_INTERVAL_MS = 2000;
+    private volatile boolean pollRunning = false;
+    private Thread pollThread;
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -130,6 +140,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         handler.postDelayed(this::createFloatingView, 300);
         registerDataReceiver();
         startHttpServer();
+        startFallbackPoll();
     }
 
     @Override
@@ -527,6 +538,61 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
+    // ======== 兜底轮询 ========
+    // 如果5秒没收到push数据，自动去插件18765/summary拉
+    private void startFallbackPoll() {
+        pollRunning = true;
+        pollThread = new Thread(() -> {
+            // 等初始push 5秒
+            try { Thread.sleep(POLL_THRESHOLD_MS); } catch (InterruptedException e) { return; }
+            while (pollRunning) {
+                long elapsed = System.currentTimeMillis() - lastDataTime;
+                if (elapsed > POLL_THRESHOLD_MS) {
+                    String data = httpGet("http://127.0.0.1:18765/summary");
+                    if (data != null && !data.isEmpty() && !data.contains("\"error\"")) {
+                        Log.d(TAG, "Fallback poll got data");
+                        handleData(data);
+                    }
+                }
+                try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException e) { break; }
+            }
+        });
+        pollThread.setDaemon(true);
+        pollThread.setName("FallbackPoll");
+        pollThread.start();
+    }
+
+    private void stopFallbackPoll() {
+        pollRunning = false;
+        if (pollThread != null) pollThread.interrupt();
+    }
+
+    private String httpGet(String urlStr) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(1500);
+            conn.setReadTimeout(1500);
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+                return sb.toString();
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     // ======== 通知栏 ========
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -635,6 +701,15 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             isViewAdded = true;
             Log.d(TAG, "Floating view added");
 
+            // 关闭按钮
+            View btnClose = floatingView.findViewById(R.id.btn_close);
+            if (btnClose != null) {
+                btnClose.setOnClickListener(v -> {
+                    Log.d(TAG, "Close button clicked");
+                    stopSelf();
+                });
+            }
+
         } catch (Exception e) {
             Log.e(TAG, "createFloatingView failed: " + e.getMessage(), e);
             handler.postDelayed(() -> {
@@ -701,6 +776,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     @Override
     public void onDestroy() {
         super.onDestroy();
+        stopFallbackPoll();
         stopHttpServer();
         if (floatingView != null && isViewAdded) {
             try {

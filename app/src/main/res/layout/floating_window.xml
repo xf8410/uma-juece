@@ -8,7 +8,7 @@
     android:padding="8dp"
     android:minWidth="280dp">
 
-    <!-- 顶部：日期/总属性/体力/干劲 -->
+    <!-- 顶部：日期/总属性/体力/干劲 + 关闭按钮 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -23,6 +23,17 @@
             android:textColor="#AAAAAA"
             android:textSize="10sp"
             android:text="---" />
+
+        <TextView
+            android:id="@+id/btn_close"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:text="×"
+            android:textColor="#666666"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true" />
 
         <TextView
             android:id="@+id/tv_total"
