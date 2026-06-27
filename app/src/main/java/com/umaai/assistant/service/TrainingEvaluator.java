@@ -700,56 +700,106 @@ public class TrainingEvaluator {
             return bonus;
         }
 
-        // 1. 队员等级加成：每个队员提供10%-30%训练加成
+        int month = summary.optInt("month", 1);
+        int half = summary.optInt("half", 1);
+        int totalTurn = (month - 1) * 2 + half;
+        boolean lateGame = month >= 5;  // 第三年开始算后期
+        boolean finalSummer = month == 7;  // 第三年夏训（4次梦想训练）
+
+        // 1. 队员等级加成 + 梦想槽状态
         double memberTrainBonus = 0.0;
-        int burstCount = 0;
+        int burstReadyCount = 0;   // 魂爆可用（梦想槽满gauge=3）
+        int gaugeUnfilledCount = 0; // 梦想槽未满的队员数
         int minLevel = Integer.MAX_VALUE;
         for (int i = 0; i < members.length(); i++) {
             try {
                 JSONObject m = members.getJSONObject(i);
                 int level = m.optInt("level", 0);
-                boolean burst = m.optBoolean("is_burst", false);
+                int gauge = m.optInt("dream_gauge", 0);
+                boolean burstReady = m.optBoolean("burst_ready", false) || m.optBoolean("is_burst", false);
                 if (level >= 0 && level < BREEDERS_TRAIN_BONUS.length) {
                     memberTrainBonus += BREEDERS_TRAIN_BONUS[level];
                 }
-                if (burst) burstCount++;
+                if (burstReady) {
+                    burstReadyCount++;
+                } else if (gauge < 3) {
+                    gaugeUnfilledCount++;
+                }
                 if (level < minLevel) minLevel = level;
             } catch (JSONException e) { /* skip */ }
         }
 
-        // 队员训练加成转换为评分（每个10%约等于+8分）
+        // 队员训练加成转换为评分
         bonus += memberTrainBonus * 80.0;
 
-        // 2. 魂爆额外加成（每个魂爆队员+30%训练加成）
-        bonus += burstCount * BREEDERS_BURST_BONUS * 80.0;
+        // 2. 魂爆逻辑：
+        // gauge=3代表"梦想槽满，可以魂爆"，不是"已经魂爆过"
+        // 魂爆后队员升级+gauge重置，所以burstReady=true的队员
+        // 在下次训练时会提供额外+30%加成
+        if (burstReadyCount > 0) {
+            // 有可魂爆的队员 → 魂爆后+30%，而且队员升级后永久加成提高
+            // 前期鼓励魂爆（升级提升大），后期溢出风险时要谨慎
+            if (lateGame && memberTrainBonus > 0.6) {
+                // 后期加成已高，魂爆可能溢出，但仍值得（升级永久收益）
+                bonus += burstReadyCount * BREEDERS_BURST_BONUS * 60.0;
+            } else {
+                // 前期或加成不高，全力魂爆
+                bonus += burstReadyCount * BREEDERS_BURST_BONUS * 80.0;
+            }
+            // 魂爆后队员升级，永久提高队伍等级 → 友情加成+得意率提升
+            if (minLevel < 7) {  // 队伍等级<S时，升级收益大
+                bonus += burstReadyCount * 20.0;
+            }
+        }
 
-        // 3. 队伍等级影响（友情加成+得意率 → 有支援卡人头时更值钱）
+        // 3. 队伍等级影响（友情加成+得意率）
         if (minLevel < Integer.MAX_VALUE && minLevel >= 0 && minLevel < BREEDERS_TEAM_FRIENDSHIP.length) {
             double friendshipBonus = BREEDERS_TEAM_FRIENDSHIP[minLevel];
             double tokuiBonus = BREEDERS_TEAM_TOKUI[minLevel];
             int heads = trData.optInt("heads", 0);
-            // 有人头时友情+得意率加成更明显
             if (heads > 0) {
                 bonus += heads * friendshipBonus * 15.0;
                 bonus += tokuiBonus * 10.0;
             }
         }
 
-        // 4. 梦想训练提示：如果还有梦想训练次数，训练价值提升
-        int dreamLeft = teamData != null ? teamData.optInt("dream_training_left", 0) : 0;
+        // 4. 梦想训练时机建议
+        int dreamLeft = teamData != null ? teamData.optInt("dream_training_left", -1) : -1;
         if (dreamLeft > 0) {
-            // 梦想训练时固定5+3人头，训练收益大幅提升
-            // 但只有当前回合能触发梦想训练时才加
-            bonus += dreamLeft * 5.0;
+            // 梦想训练=所有训练变5支援卡+3队员人头，副属性-90%
+            // 最佳使用时机：当主力属性训练有人头时
+            int heads = trData.optInt("heads", 0);
+            int shining = trData.optInt("shining", 0);
+            if (heads >= 2 || shining > 0) {
+                // 当前训练人头多/有彩圈 → 梦想训练收益更大
+                bonus += dreamLeft * 15.0;
+            } else {
+                bonus += dreamLeft * 5.0;
+            }
+            // 第三年夏训4次梦想训练，必须用完不能存
+            if (finalSummer && dreamLeft > 0) {
+                bonus += dreamLeft * 10.0;  // 紧急：不用就浪费了
+            }
         }
 
-        // 5. 梦想槽未满的队员：鼓励选择人头多的训练来积攒梦想槽
-        // 同一训练上多人头 → 多个队员梦想槽同时+1
+        // 5. 鼓励积攒梦想槽
         int heads = trData.optInt("heads", 0);
         int shining = trData.optInt("shining", 0);
-        if (heads >= 2 && shining > 0) {
-            // 彩圈+多人头 = 快速积攒梦想槽的最佳机会
-            bonus += 15.0;
+        if (gaugeUnfilledCount > 0) {
+            // 还有队员梦想槽没满 → 优先选人头多的训练加速积攒
+            if (heads >= 3) {
+                bonus += 12.0;  // 3+人头：多个队员同时+1
+            } else if (heads >= 2) {
+                bonus += 6.0;
+            }
+            // 彩圈+多人头 = 积攒梦想槽的最佳机会
+            if (heads >= 2 && shining > 0) {
+                bonus += 18.0;
+            }
+            // 前期更应积攒（为了尽早魂爆升级）
+            if (!lateGame && heads >= 2) {
+                bonus += 8.0;
+            }
         }
 
         return bonus;
