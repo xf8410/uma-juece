@@ -152,6 +152,66 @@
         android:layout_marginTop="2dp"
         android:layout_marginBottom="2dp" />
 
+    <!-- Buff区域 -->
+    <LinearLayout
+        android:id="@+id/buff_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_buff_ao"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#66AAFF"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/tv_buff_midori"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#66FF88"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/tv_buff_momo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#FF88AA"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:text="" />
+    </LinearLayout>
+
+    <!-- Buff详情（点击展开） -->
+    <TextView
+        android:id="@+id/tv_buff_detail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#999999"
+        android:textSize="8sp"
+        android:visibility="gone"
+        android:text="" />
+
+    <!-- 分隔线（buff下方） -->
+    <View
+        android:id="@+id/buff_separator"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#333333"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="2dp"
+        android:visibility="gone" />
+
     <!-- 底部：设施/Hook状态 -->
     <LinearLayout
         android:layout_width="match_parent"

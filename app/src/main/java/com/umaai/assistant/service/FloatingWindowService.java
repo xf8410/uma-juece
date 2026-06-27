@@ -19,6 +19,7 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.core.app.NotificationCompat;
@@ -33,28 +34,11 @@ import org.json.JSONObject;
 import java.util.Iterator;
 
 /**
- * 小黑板风格浮窗服务 v1.6
+ * 小黑板风格浮窗服务 v1.7
  * 黑底+彩色文字，显示插件推送的 /summary 数据
+ * 支持剧本buff显示（青・緑・桃 / 新剧本适配）
  *
  * 数据来源：插件 v3.10.0+ 主动 POST /summary JSON 到 18766
- * 格式：
- * {
- *   "version": "3.10.0",
- *   "month": 12, "half": 2,
- *   "scenario": "Breeders",
- *   "stats": {
- *     "speed":735, "stamina":297, "power":448, "guts":216, "wiz":316,
- *     "vital":82, "max_vital":108, "motivation":"Best",
- *     "skill_point":1606, "fan":30175
- *   },
- *   "trainings": [
- *     {"name":"Speed","gains":{"Speed":4,"SkillPt":3}},
- *     {"name":"Stamina","gains":{"Stamina":1,"Guts":3,"SkillPt":3}},
- *     {"name":"Power","gains":{}},
- *     {"name":"Guts","gains":{}},
- *     {"name":"Wiz","gains":{"Speed":1,"Wiz":4,"SkillPt":5}}
- *   ]
- * }
  */
 public class FloatingWindowService extends Service implements HttpDataService.OnDataListener {
 
@@ -77,6 +61,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private static final int COLOR_WIT_DIM = 0xFFCCBB44;
     private static final int COLOR_DEFAULT = 0xFF00FF88;
 
+    // Buff颜色
+    private static final int COLOR_BUFF_AO = 0xFF66AAFF;    // 青
+    private static final int COLOR_BUFF_MIDORI = 0xFF66FF88; // 緑
+    private static final int COLOR_BUFF_MOMO = 0xFFFF88AA;   // 桃
+
     private WindowManager windowManager;
     private View floatingView;
     private WindowManager.LayoutParams params;
@@ -91,6 +80,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvSpdVal, tvSpdGain, tvStaVal, tvStaGain;
     private TextView tvPwrVal, tvPwrGain, tvGutVal, tvGutGain;
     private TextView tvWitVal, tvWitGain;
+    // Buff
+    private LinearLayout buffContainer;
+    private TextView tvBuffAo, tvBuffMidori, tvBuffMomo;
+    private TextView tvBuffDetail;
+    private View buffSeparator;
     // 底部
     private TextView tvFacility, tvHookStatus;
 
@@ -104,6 +98,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     // 数据更新时间
     private long lastDataTime = 0;
+
+    // 当前剧本
+    private String currentScenario = "";
 
     private BroadcastReceiver dataReceiver;
 
@@ -178,7 +175,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             try {
                 JSONObject stats = json.getJSONObject("stats");
                 JSONArray trainings = json.getJSONArray("trainings");
+                JSONArray buffs = json.optJSONArray("buffs");
                 lastDataTime = System.currentTimeMillis();
+
+                // 记录当前剧本
+                currentScenario = json.optString("scenario", "");
 
                 // 回合信息
                 int month = json.optInt("month", -1);
@@ -186,7 +187,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (month > 0) {
                     tvTurn.setText(month + "月" + (half == 1 ? "前" : "後"));
                 } else {
-                    tvTurn.setText(json.optString("scenario", "---"));
+                    tvTurn.setText(currentScenario.isEmpty() ? "---" : currentScenario);
                 }
 
                 // 総合 + Pt
@@ -233,6 +234,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // 推荐训练
                 recommendFromTrainings(trainings, stats);
 
+                // ★ Buff显示 - 根据剧本分支
+                updateBuffs(buffs);
+
                 // 状态
                 if (tvHookStatus != null) {
                     tvHookStatus.setText("Push:ON");
@@ -243,6 +247,136 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 Log.w(TAG, "Summary parse error: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * 更新Buff显示区域
+     * 根据scenario字段走不同显示逻辑
+     */
+    private void updateBuffs(JSONArray buffs) {
+        if (buffs == null || buffs.length() == 0) {
+            // 无buff数据时隐藏buff区域
+            if (buffContainer != null) buffContainer.setVisibility(View.GONE);
+            if (tvBuffDetail != null) tvBuffDetail.setVisibility(View.GONE);
+            if (buffSeparator != null) buffSeparator.setVisibility(View.GONE);
+            return;
+        }
+
+        // 显示buff区域
+        if (buffContainer != null) buffContainer.setVisibility(View.VISIBLE);
+        if (buffSeparator != null) buffSeparator.setVisibility(View.VISIBLE);
+
+        try {
+            // 根据剧本名称走不同显示逻辑
+            if ("Breeders".equals(currentScenario)) {
+                // Breeders剧本：青・緑・桃三个buff
+                updateBreedersBuffs(buffs);
+            } else {
+                // 其他剧本：通用显示
+                updateGenericBuffs(buffs);
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Buff parse error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Breeders剧本buff显示：青・緑・桃
+     */
+    private void updateBreedersBuffs(JSONArray buffs) throws JSONException {
+        String aoLevel = "-", aoDesc = "";
+        String midoriLevel = "-", midoriDesc = "";
+        String momoLevel = "-", momoDesc = "";
+
+        for (int i = 0; i < buffs.length(); i++) {
+            JSONObject b = buffs.getJSONObject(i);
+            String name = b.getString("name");
+            int level = b.getInt("level");
+            String desc = b.optString("desc", "");
+
+            if ("青".equals(name)) {
+                aoLevel = "Lv" + level;
+                aoDesc = desc;
+            } else if ("緑".equals(name)) {
+                midoriLevel = "Lv" + level;
+                midoriDesc = desc;
+            } else if ("桃".equals(name)) {
+                momoLevel = "Lv" + level;
+                momoDesc = desc;
+            }
+        }
+
+        if (tvBuffAo != null) {
+            tvBuffAo.setText("青" + aoLevel);
+            tvBuffAo.setTextColor(COLOR_BUFF_AO);
+        }
+        if (tvBuffMidori != null) {
+            tvBuffMidori.setText("緑" + midoriLevel);
+            tvBuffMidori.setTextColor(COLOR_BUFF_MIDORI);
+        }
+        if (tvBuffMomo != null) {
+            tvBuffMomo.setText("桃" + momoLevel);
+            tvBuffMomo.setTextColor(COLOR_BUFF_MOMO);
+        }
+
+        // 详情行
+        if (tvBuffDetail != null) {
+            StringBuilder detail = new StringBuilder();
+            if (!aoDesc.isEmpty()) detail.append("青:").append(aoDesc).append(" ");
+            if (!midoriDesc.isEmpty()) detail.append("緑:").append(midoriDesc).append(" ");
+            if (!momoDesc.isEmpty()) detail.append("桃:").append(momoDesc);
+            if (detail.length() > 0) {
+                tvBuffDetail.setText(detail.toString().trim());
+                tvBuffDetail.setVisibility(View.VISIBLE);
+            } else {
+                tvBuffDetail.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    /**
+     * 通用buff显示（新剧本等）
+     */
+    private void updateGenericBuffs(JSONArray buffs) throws JSONException {
+        // 前3个buff放到三列
+        if (tvBuffAo != null && buffs.length() > 0) {
+            JSONObject b0 = buffs.getJSONObject(0);
+            tvBuffAo.setText(b0.getString("name") + "Lv" + b0.getInt("level"));
+            tvBuffAo.setTextColor(0xFF66AAFF);
+        }
+        if (tvBuffMidori != null && buffs.length() > 1) {
+            JSONObject b1 = buffs.getJSONObject(1);
+            tvBuffMidori.setText(b1.getString("name") + "Lv" + b1.getInt("level"));
+            tvBuffMidori.setTextColor(0xFF66FF88);
+        } else if (tvBuffMidori != null) {
+            tvBuffMidori.setText("");
+        }
+        if (tvBuffMomo != null && buffs.length() > 2) {
+            JSONObject b2 = buffs.getJSONObject(2);
+            tvBuffMomo.setText(b2.getString("name") + "Lv" + b2.getInt("level"));
+            tvBuffMomo.setTextColor(0xFFFF88AA);
+        } else if (tvBuffMomo != null) {
+            tvBuffMomo.setText("");
+        }
+
+        // 详情行：所有buff的desc
+        if (tvBuffDetail != null) {
+            StringBuilder detail = new StringBuilder();
+            for (int i = 0; i < buffs.length(); i++) {
+                JSONObject b = buffs.getJSONObject(i);
+                String desc = b.optString("desc", "");
+                if (!desc.isEmpty()) {
+                    if (detail.length() > 0) detail.append(" ");
+                    detail.append(b.getString("name")).append(":").append(desc);
+                }
+            }
+            if (detail.length() > 0) {
+                tvBuffDetail.setText(detail.toString());
+                tvBuffDetail.setVisibility(View.VISIBLE);
+            } else {
+                tvBuffDetail.setVisibility(View.GONE);
+            }
+        }
     }
 
     /** 从 /summary 更新单个属性显示 */
@@ -420,6 +554,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvWitGain = floatingView.findViewById(R.id.tv_wit_gain);
             tvFacility = floatingView.findViewById(R.id.tv_facility);
             tvHookStatus = floatingView.findViewById(R.id.tv_hook_status);
+
+            // Buff视图
+            buffContainer = floatingView.findViewById(R.id.buff_container);
+            tvBuffAo = floatingView.findViewById(R.id.tv_buff_ao);
+            tvBuffMidori = floatingView.findViewById(R.id.tv_buff_midori);
+            tvBuffMomo = floatingView.findViewById(R.id.tv_buff_momo);
+            tvBuffDetail = floatingView.findViewById(R.id.tv_buff_detail);
+            buffSeparator = floatingView.findViewById(R.id.buff_separator);
 
             int layoutFlag;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
