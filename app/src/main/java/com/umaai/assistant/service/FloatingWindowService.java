@@ -132,8 +132,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public void onDataReceived(String data) {
         Log.d(TAG, "HTTP data received: " + data);
         handleData(data);
-    });
-        }
     }
 
     // ======== 数据处理核心 ========
