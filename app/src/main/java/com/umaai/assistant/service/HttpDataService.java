@@ -73,15 +73,6 @@ public class HttpDataService extends NanoHTTPD {
                 case "/test_board":
                     return handleTestBoard();
 
-                case "/config":
-                    if (method == Method.POST) {
-                        return handleConfig(session);
-                    } else if (method == Method.GET) {
-                        return handleConfigStatus();
-                    }
-                    return newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED,
-                            "text/plain", "Use GET or POST");
-
                 default:
                     return newFixedLengthResponse(Response.Status.NOT_FOUND,
                             "text/plain", "Not found. Try /status, /data, /test_board");
@@ -97,7 +88,7 @@ public class HttpDataService extends NanoHTTPD {
         JSONObject status = new JSONObject();
         try {
             status.put("app", "uma-juece");
-            status.put("version", "1.6");
+            status.put("version", "1.15");
             status.put("mode", "blackboard");
             status.put("http_port", PORT);
             status.put("hook_port", 18765);
@@ -149,7 +140,6 @@ public class HttpDataService extends NanoHTTPD {
         if (postData != null && !postData.isEmpty()) {
             try {
                 JSONObject json = new JSONObject(postData);
-                // 直接传JSON给FloatingWindowService解析
                 displayText = json.toString();
             } catch (JSONException e) {
                 displayText = postData;
@@ -169,37 +159,6 @@ public class HttpDataService extends NanoHTTPD {
         }
         return newFixedLengthResponse(Response.Status.OK, "application/json", result.toString());
     }
-
-    /**
-     * 设置配置（如GitHub token）
-     * POST /config {"github_token": "ghp_xxx"}
-     */
-    private Response handleConfig(IHTTPSession session) throws IOException, ResponseException {
-        Map<String, String> body = new HashMap<>();
-        session.parseBody(body);
-        String postData = body.get("postData");
-
-        if (postData != null && !postData.isEmpty()) {
-            try {
-                JSONObject json = new JSONObject(postData);
-                String token = json.optString("github_token", "");
-                if (!token.isEmpty() && dataListener instanceof FloatingWindowService) {
-                    ((FloatingWindowService) dataListener).getDataCollector().setGitHubToken(token);
-                }
-                JSONObject result = new JSONObject();
-                result.put("ok", true);
-                result.put("message", "Config updated");
-                return newFixedLengthResponse(Response.Status.OK, "application/json", result.toString());
-            } catch (JSONException e) {
-                return newFixedLengthResponse(Response.Status.BAD_REQUEST,
-                        "text/plain", "Invalid JSON: " + e.getMessage());
-            }
-        }
-        return newFixedLengthResponse(Response.Status.BAD_REQUEST,
-                "text/plain", "Empty body");
-    }
-
-
 
     /**
      * 推送小黑板测试数据，模拟URA面板
