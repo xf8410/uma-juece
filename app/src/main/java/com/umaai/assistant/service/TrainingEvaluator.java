@@ -520,7 +520,7 @@ public class TrainingEvaluator {
             }
             int heads = trData.optInt("heads", 0);
             if (heads > 0) {
-                sb.append(" 頭").append(heads);
+                sb.append(" 人").append(heads);
             }
         }
         return sb.toString();
