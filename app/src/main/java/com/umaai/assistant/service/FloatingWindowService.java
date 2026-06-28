@@ -135,6 +135,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     // 训练评分引擎
     private TrainingEvaluator evaluator = new TrainingEvaluator();
     private DataCollector dataCollector;
+    private DebugLogSaver debugLogSaver;
 
     // 兜底轮询：5秒没收到push就主动去18765拉数据
     private static final long POLL_THRESHOLD_MS = 5000;
@@ -158,6 +159,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS_NAME, MODE_PRIVATE);
         selectedScenario = prefs.getString(MainActivity.KEY_SCENARIO, "URA");
         dataCollector = new DataCollector(this);
+        debugLogSaver = new DebugLogSaver(this);
 
         handler.postDelayed(this::createFloatingView, 300);
         registerDataReceiver();
@@ -232,10 +234,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // ★ 数据收集：记录回合快照
                 if (dataCollector != null) {
                     String action = dataCollector.onSummaryData(json);
-                    // 更新收集状态显示
                     int turnCount = dataCollector.getTurnCount();
+                    // ★ v1.19: Auto-save debug log every new turn
+                    boolean logSaved = debugLogSaver != null && debugLogSaver.onSummaryUpdate(json);
                     if (tvHookStatus != null) {
-                        tvHookStatus.setText("Push:ON 記録:" + turnCount);
+                        String logStatus = debugLogSaver != null ? " " + debugLogSaver.getStatusText() : "";
+                        tvHookStatus.setText("Push:ON 記録:" + turnCount + logStatus);
                         tvHookStatus.setTextColor(0xFF00FF88);
                     }
                 }
@@ -1060,6 +1064,21 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             Log.d(TAG, "Floating view added");
 
             View btnClose = floatingView.findViewById(R.id.btn_close);
+            TextView btnLog = floatingView.findViewById(R.id.btn_debug_log);
+            if (btnLog != null) {
+                btnLog.setOnClickListener(v -> {
+                    if (debugLogSaver != null) {
+                        debugLogSaver.manualSave((success, msg) ->
+                            handler.post(() -> {
+                                if (tvHookStatus != null) {
+                                    tvHookStatus.setText("Log:" + msg);
+                                    tvHookStatus.setTextColor(success ? 0xFF00FF88 : 0xFFFF4444);
+                                }
+                            })
+                        );
+                    }
+                });
+            }
             if (btnClose != null) {
                 btnClose.setOnClickListener(v -> {
                     Log.d(TAG, "Close button clicked");
