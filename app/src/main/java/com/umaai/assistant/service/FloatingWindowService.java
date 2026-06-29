@@ -320,20 +320,24 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray evaluation = json.optJSONArray("evaluation");
                 updateEvaluationInfo(evaluation);
 
-                // ★ 比赛回合检测：trainings为空或全部增益为0 → 比赛中
+                // ★ v1.22: 比赛回合检测 — 有训练选项(非Unknown)就不是比赛
+                // 旧逻辑依赖gains非空，但Ramen场景gains常为空→误判
                 boolean isRaceTurn = true;
-                if (trainings != null && trainings.length() > 0) {
+                if (month > 0 && trainings != null && trainings.length() > 0) {
                     for (int ti = 0; ti < trainings.length(); ti++) {
                         JSONObject tr = trainings.optJSONObject(ti);
-                        JSONObject gains = tr != null ? tr.optJSONObject("gains") : null;
-                        if (gains != null && gains.length() > 0) {
+                        if (tr == null) continue;
+                        String tName = tr.optString("name", "");
+                        int tHeads = tr.optInt("heads", -1);
+                        // 有已知训练名 + heads>=0 = 训练选择画面，不是比赛
+                        if (!"Unknown".equals(tName) && tHeads >= 0) {
                             isRaceTurn = false;
                             break;
                         }
                     }
                 }
-                // month < 0 也视为非正常回合（加载/比赛画面等）
-                if (month <= 0) isRaceTurn = true;
+                // month<=0 且无有效训练 → 待機/加载中
+                if (month <= 0 && (trainings == null || trainings.length() == 0)) isRaceTurn = true;
 
                 if (isRaceTurn) {
                     tvRecommend.setText("▶ 比賽中");
