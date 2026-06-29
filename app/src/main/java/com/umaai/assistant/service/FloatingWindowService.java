@@ -320,6 +320,26 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray evaluation = json.optJSONArray("evaluation");
                 updateEvaluationInfo(evaluation);
 
+                // ★ 比赛回合检测：trainings为空或全部增益为0 → 比赛中
+                boolean isRaceTurn = true;
+                if (trainings != null && trainings.length() > 0) {
+                    for (int ti = 0; ti < trainings.length(); ti++) {
+                        JSONObject tr = trainings.optJSONObject(ti);
+                        JSONObject gains = tr != null ? tr.optJSONObject("gains") : null;
+                        if (gains != null && gains.length() > 0) {
+                            isRaceTurn = false;
+                            break;
+                        }
+                    }
+                }
+                // month < 0 也视为非正常回合（加载/比赛画面等）
+                if (month <= 0) isRaceTurn = true;
+
+                if (isRaceTurn) {
+                    tvRecommend.setText("▶ 比賽中");
+                    tvRecommend.setTextColor(0xFF4FC3F7);
+                    if (tvAiDetail != null) tvAiDetail.setVisibility(View.GONE);
+                } else {
                 // 推荐训练 — 优先使用插件AI评估
                 JSONObject aiObj = json.optJSONObject("ai");
                 if (aiObj != null) {
@@ -339,6 +359,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         tvRecommend.setText("▶ " + evalResult.bestDetail);
                         tvRecommend.setTextColor(COLOR_DEFAULT);
                     }
+                }
                 }
 
                 // ★ Buff显示 - 根据剧本分支
