@@ -371,6 +371,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // ★ Buff显示 - 根据剧本分支
                 updateBuffs(buffs);
 
+                // ★ Ramen剧本详细信息（CheckpointPt/隠し味/Recommend/Region）
+                if ("Ramen".equals(currentScenario)) {
+                    updateRamenInfo(json);
+                }
+
                 // ★ 队员显示（育马者杯）
                 updateTeamMembers(json);
 
@@ -529,6 +534,74 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      *   "team_members": [{"chara_id":X, "level":3, "dream_gauge":2, "is_burst":false}, ...]
      *   "team_rank": 3, "dream_training_left": 2
      */
+    /**
+     * 更新拉面杯剧本特有信息
+     * 显示: CheckpointPt进度, 隠し味の秘訣数量, 推荐类型, 已选地域
+     */
+    private void updateRamenInfo(JSONObject json) {
+        JSONObject ramen = json.optJSONObject("ramen");
+        if (ramen == null) return;
+
+        StringBuilder info = new StringBuilder();
+
+        // CheckpointPt
+        int cppt = ramen.optInt("checkpoint_pt", -1);
+        int ecppt = ramen.optInt("expected_checkpoint_pt", -1); // may not exist in summary
+        if (cppt >= 0) {
+            info.append("CP:").append(cppt);
+            if (ecppt > cppt) info.append("/").append(ecppt);
+            info.append(" ");
+        }
+
+        // SpecialFeelingNum (隠し味の秘訣 count)
+        int sfn = ramen.optInt("special_feeling_num", -1);
+        if (sfn >= 0) {
+            info.append("隠味:").append(sfn).append(" ");
+        }
+
+        // RecommendType
+        int rt = ramen.optInt("recommend_type", -1);
+        if (rt >= 0) {
+            String rtName;
+            switch (rt) {
+                case 1: rtName = "速度推"; break;
+                case 2: rtName = "耐力推"; break;
+                case 3: rtName = "根性推"; break;
+                case 4: rtName = "力推"; break;
+                case 5: rtName = "智力推"; break;
+                default: rtName = "推" + rt; break;
+            }
+            info.append(rtName).append(" ");
+        }
+
+        // FeelingInfo array - count and types
+        JSONArray feelingInfo = ramen.optJSONArray("feeling_info");
+        if (feelingInfo != null && feelingInfo.length() > 0) {
+            int goodCount = 0, badCount = 0;
+            for (int fi = 0; fi < feelingInfo.length(); fi++) {
+                JSONObject fe = feelingInfo.optJSONObject(fi);
+                if (fe == null) continue;
+                int fType = fe.optInt("FeelingType", 0);
+                if (fType == 10 || fType == 11) goodCount++;  // 練習上手/練習◎
+                else if (fType >= 1 && fType <= 7) badCount++; // BC系
+            }
+            if (goodCount > 0) info.append("良効:").append(goodCount).append(" ");
+            if (badCount > 0) info.append("悪効:").append(badCount).append(" ");
+        }
+
+        // SelectedRegionIds
+        JSONArray regionIds = ramen.optJSONArray("selected_region_ids");
+        if (regionIds != null && regionIds.length() > 0) {
+            info.append("地域:").append(regionIds.length());
+        }
+
+        // Display in buff_detail area
+        if (tvBuffDetail != null && info.length() > 0) {
+            tvBuffDetail.setText(info.toString().trim());
+            tvBuffDetail.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void updateTeamMembers(JSONObject json) {
         String scenario = json.optString("scenario", "");
         if (!"Dreams".equals(scenario)) {
@@ -829,11 +902,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         tvVal.setText(String.valueOf(current));
 
         int cmdId = -1;
-        if ("Speed".equals(gainKey)) cmdId = 101;
-        else if ("Stamina".equals(gainKey)) cmdId = 102;
-        else if ("Power".equals(gainKey)) cmdId = 105;
-        else if ("Guts".equals(gainKey)) cmdId = 103;
-        else if ("Wiz".equals(gainKey)) cmdId = 106;
+        int ramenCmdId = -1;
+        if ("Speed".equals(gainKey)) { cmdId = 101; ramenCmdId = 601; }
+        else if ("Stamina".equals(gainKey)) { cmdId = 102; ramenCmdId = 602; }
+        else if ("Power".equals(gainKey)) { cmdId = 105; ramenCmdId = 604; }
+        else if ("Guts".equals(gainKey)) { cmdId = 103; ramenCmdId = 603; }
+        else if ("Wiz".equals(gainKey)) { cmdId = 106; ramenCmdId = 605; }
 
         int failureRate = -1;
         int heads = -1;
@@ -841,7 +915,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (cmdId > 0) {
             for (int i = 0; i < trainings.length(); i++) {
                 JSONObject tr = trainings.getJSONObject(i);
-                if (tr.optInt("command_id", -1) == cmdId) {
+                int trCmdId = tr.optInt("command_id", -1);
+                if (trCmdId == cmdId || trCmdId == ramenCmdId) {
                     failureRate = tr.optInt("failure_rate", -1);
                     heads = tr.optInt("heads", -1);
                     shining = tr.optInt("shining", -1);
@@ -885,6 +960,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         java.util.Map<Integer, Integer> cmdMap = new java.util.HashMap<>();
         cmdMap.put(101, 0); cmdMap.put(102, 1); cmdMap.put(103, 3);
         cmdMap.put(105, 2); cmdMap.put(106, 4);
+        // Ramen scenario: 601-605 map to same positions
+        cmdMap.put(601, 0); cmdMap.put(602, 1); cmdMap.put(603, 3);
+        cmdMap.put(604, 2); cmdMap.put(605, 4);
 
         int[] levels = {1, 1, 1, 1, 1};
         TextView[] lvViews = {tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv};
@@ -1294,3 +1372,4 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         handler.removeCallbacksAndMessages(null);
     }
 }
+
