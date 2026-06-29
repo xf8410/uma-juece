@@ -354,6 +354,17 @@
             android:paddingEnd="4dp"
             android:clickable="true"
             android:focusable="true" />
+        <TextView
+            android:id="@+id/btn_dump"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#666666"
+            android:textSize="8sp"
+            android:text="DUMP"
+            android:paddingStart="6dp"
+            android:paddingEnd="4dp"
+            android:clickable="true"
+            android:focusable="true" />
     </LinearLayout>
 
 </LinearLayout>

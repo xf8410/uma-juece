@@ -136,6 +136,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TrainingEvaluator evaluator = new TrainingEvaluator();
     private DataCollector dataCollector;
     private DebugLogSaver debugLogSaver;
+    private EndpointDumper endpointDumper;
 
     // 兜底轮询：5秒没收到push就主动去18765拉数据
     private static final long POLL_THRESHOLD_MS = 5000;
@@ -160,6 +161,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         selectedScenario = prefs.getString(MainActivity.KEY_SCENARIO, "URA");
         dataCollector = new DataCollector(this);
         debugLogSaver = new DebugLogSaver(this);
+        endpointDumper = new EndpointDumper(this);
 
         handler.postDelayed(this::createFloatingView, 300);
         registerDataReceiver();
@@ -1145,6 +1147,16 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                 }
                             })
                         );
+                    }
+                });
+            }
+
+            // DUMP按钮：一键抓取所有端点数据上传GitHub
+            TextView btnDump = floatingView.findViewById(R.id.btn_dump);
+            if (btnDump != null) {
+                btnDump.setOnClickListener(v -> {
+                    if (endpointDumper != null) {
+                        endpointDumper.dumpAll(currentScenario);
                     }
                 });
             }
