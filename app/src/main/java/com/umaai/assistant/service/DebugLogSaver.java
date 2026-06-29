@@ -19,10 +19,11 @@ import java.util.Locale;
 /**
  * Debug日志自动保存器
  *
- * 每回合自动拉取 /debug/breeders 原始JSON，上传到GitHub uma-data仓库。
- * 不做diff，每回合无条件存一份，育成结束后统一分析。
+ * 每回合自动保存两份数据到GitHub uma-data仓库：
+ * 1. /debug/breeders → debug_logs/{scenario}/
+ * 2. /summary → summary_logs/{scenario}/（含buffs/active_effects等Ramen数据）
  *
- * 路径: debug_logs/{scenario}/YYYYMMDD_HHmmss.txt
+ * 不做diff，每回合无条件存一份，育成结束后统一分析。
  */
 public class DebugLogSaver {
 
@@ -35,12 +36,15 @@ public class DebugLogSaver {
     private static final String GITHUB_TOKEN = _TK_P1 + _TK_P2;
 
     private static final String DEBUG_URL = "http://127.0.0.1:18765/debug/breeders";
+    private static final String SUMMARY_URL = "http://127.0.0.1:18765/summary";
 
     private Context context;
     private String currentScenario = "";
     private int lastMonth = -1;
     private int lastHalf = -1;
     private volatile boolean saving = false;
+    /** 最近一次推送的/summary JSON原文，用于存GitHub */
+    private volatile String lastSummaryJson = "";
 
     public interface SaveCallback {
         void onSaved(boolean success, String message);
@@ -52,20 +56,23 @@ public class DebugLogSaver {
 
     /**
      * 收到/summary推送时调用，检测新回合就自动存
+     * @param json 推送过来的/summary JSON对象
+     * @param rawJson 推送原文（用于存GitHub，保留完整字段）
      */
-    public boolean onSummaryUpdate(JSONObject json) {
+    public boolean onSummaryUpdate(JSONObject json, String rawJson) {
         try {
             int month = json.optInt("month", -1);
             int half = json.optInt("half", -1);
             String scenario = json.optString("scenario", "");
             if (!scenario.isEmpty()) currentScenario = scenario;
+            if (rawJson != null && !rawJson.isEmpty()) lastSummaryJson = rawJson;
 
             boolean newTurn = (month != lastMonth || half != lastHalf) && month > 0;
             lastMonth = month;
             lastHalf = half;
 
             if (newTurn) {
-                Log.d(TAG, "New turn: " + month + "月" + half + "半, auto-saving debug log...");
+                Log.d(TAG, "New turn: " + month + "月" + half + "半, auto-saving...");
                 fetchAndSave(null);
                 return true;
             }
@@ -73,6 +80,11 @@ public class DebugLogSaver {
             Log.e(TAG, "onSummaryUpdate error: " + e.getMessage());
         }
         return false;
+    }
+
+    /** 兼容旧调用（不传rawJson） */
+    public boolean onSummaryUpdate(JSONObject json) {
+        return onSummaryUpdate(json, null);
     }
 
     /** 手动触发 */
@@ -88,13 +100,22 @@ public class DebugLogSaver {
         saving = true;
         new Thread(() -> {
             try {
-                String result = fetchDebugLog();
-                if (result == null) {
-                    if (callback != null) callback.onSaved(false, "插件离线");
-                    return;
+                // 1. 存 /debug/breeders
+                String debugResult = fetchUrl(DEBUG_URL);
+                if (debugResult != null) {
+                    uploadToGitHub(debugResult, "debug_logs", "debug log");
                 }
-                boolean ok = uploadToGitHub(result);
-                if (callback != null) callback.onSaved(ok, ok ? "已上传" : "上传失败");
+
+                // 2. 存 /summary（优先用推送原文，否则重新拉取）
+                String summaryResult = lastSummaryJson;
+                if (summaryResult == null || summaryResult.isEmpty()) {
+                    summaryResult = fetchUrl(SUMMARY_URL);
+                }
+                if (summaryResult != null) {
+                    uploadToGitHub(summaryResult, "summary_logs", "summary");
+                }
+
+                if (callback != null) callback.onSaved(true, "已上传");
             } catch (Exception e) {
                 if (callback != null) callback.onSaved(false, e.getMessage());
             } finally {
@@ -103,9 +124,9 @@ public class DebugLogSaver {
         }).start();
     }
 
-    private String fetchDebugLog() {
+    private String fetchUrl(String urlStr) {
         try {
-            URL url = new URL(DEBUG_URL);
+            URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(3000);
@@ -123,24 +144,24 @@ public class DebugLogSaver {
             }
             conn.disconnect();
         } catch (Exception e) {
-            Log.e(TAG, "fetchDebugLog: " + e.getMessage());
+            Log.e(TAG, "fetchUrl " + urlStr + ": " + e.getMessage());
         }
         return null;
     }
 
-    private boolean uploadToGitHub(String jsonContent) {
+    private boolean uploadToGitHub(String jsonContent, String dirPrefix, String label) {
         try {
             String scenarioDir = currentScenario.isEmpty() ? "Unknown" : currentScenario;
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
             String filename = timestamp + ".txt";
-            String path = "debug_logs/" + scenarioDir + "/" + filename;
+            String path = dirPrefix + "/" + scenarioDir + "/" + filename;
             String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
 
             String encoded = Base64.encodeToString(
                     jsonContent.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
 
             JSONObject body = new JSONObject();
-            body.put("message", "debug log " + scenarioDir + " " + timestamp);
+            body.put("message", label + " " + scenarioDir + " " + timestamp);
             body.put("content", encoded);
             body.put("branch", GITHUB_BRANCH);
 

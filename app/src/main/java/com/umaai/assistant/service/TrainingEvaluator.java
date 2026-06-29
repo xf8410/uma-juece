@@ -137,6 +137,7 @@ public class TrainingEvaluator {
             case "DesertIsland": return TRAIN_TYPE_BONUS_DESERT;
             case "HotSpring": return TRAIN_TYPE_BONUS_HOTSPRING;
             case "Dreams": return TRAIN_TYPE_BONUS_DREAMS;
+            case "Ramen": return TRAIN_TYPE_BONUS_DEFAULT; // TODO: 拉面杯专用参数待实测
             default: return TRAIN_TYPE_BONUS_DEFAULT;
         }
     }
@@ -156,6 +157,7 @@ public class TrainingEvaluator {
             case "DesertIsland": return FINAL_BONUS_DESERT;
             case "HotSpring": return FINAL_BONUS_HOTSPRING;
             case "Dreams": return FINAL_BONUS_DREAMS;
+            case "Ramen": return FINAL_BONUS_DEFAULT; // TODO: 拉面杯专用参数待实测
             default: return FINAL_BONUS_DEFAULT;
         }
     }
@@ -459,6 +461,11 @@ public class TrainingEvaluator {
                 // 每个队员按等级提供10%-30%训练加成，魂爆+30%
                 // 队伍等级影响友情加成/得意率/启示事件率
                 bonus += dreamsBonus(trainIdx, summary, trData);
+                break;
+
+            case "Ramen":
+                // 拉面杯: ActiveEffect buff加成 + CheckPointPt进度 + 裏風状态
+                // TODO: 等实测数据确认后加入具体逻辑
                 break;
         }
         return bonus;

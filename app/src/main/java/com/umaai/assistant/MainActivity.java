@@ -44,7 +44,8 @@ public class MainActivity extends Activity {
         "传奇杯",
         "无人岛杯",
         "温泉杯",
-        "育马者杯"
+        "育马者杯",
+        "拉面杯"
     };
     public static final String[] SCENARIO_IDS = {
         "URA",
@@ -59,7 +60,8 @@ public class MainActivity extends Activity {
         "Legends",
         "DesertIsland",
         "HotSpring",
-        "Dreams"
+        "Dreams",
+        "Ramen"
     };
 
     private TextView tvStatus;

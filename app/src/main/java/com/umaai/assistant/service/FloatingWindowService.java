@@ -198,7 +198,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
             // ★ /summary format from plugin push (v3.10.0+)
             if (json.has("version") && json.has("stats") && json.has("trainings")) {
-                updateFromSummary(json);
+                updateFromSummary(json, data);
                 return;
             }
 
@@ -223,7 +223,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     /**
      * 解析插件 /summary 格式JSON并更新浮窗
      */
-    private void updateFromSummary(JSONObject json) {
+    private void updateFromSummary(JSONObject json, String rawJson) {
         handler.post(() -> {
             try {
                 JSONObject stats = json.getJSONObject("stats");
@@ -236,7 +236,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     String action = dataCollector.onSummaryData(json);
                     int turnCount = dataCollector.getTurnCount();
                     // ★ v1.19: Auto-save debug log every new turn
-                    boolean logSaved = debugLogSaver != null && debugLogSaver.onSummaryUpdate(json);
+                    boolean logSaved = debugLogSaver != null && debugLogSaver.onSummaryUpdate(json, rawJson);
                     if (tvHookStatus != null) {
                         String logStatus = debugLogSaver != null ? " " + debugLogSaver.getStatusText() : "";
                         tvHookStatus.setText("Push:ON 記録:" + turnCount + logStatus);
@@ -387,6 +387,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             case "DesertIsland": return "无人岛杯";
             case "HotSpring": return "温泉杯";
             case "Dreams": return "育马者杯";
+            case "Ramen": return "拉面杯";
             default: return id;
         }
     }
@@ -605,14 +606,16 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         try {
             boolean hasBreedersBuff = false;
+            boolean hasRamenBuff = false;
             for (int i = 0; i < buffs.length(); i++) {
-                if ("Breeders".equals(buffs.getJSONObject(i).optString("type", ""))) {
-                    hasBreedersBuff = true;
-                    break;
-                }
+                String btype = buffs.getJSONObject(i).optString("type", "");
+                if ("Breeders".equals(btype)) hasBreedersBuff = true;
+                if ("Ramen".equals(btype)) hasRamenBuff = true;
             }
             if (hasBreedersBuff) {
                 updateBreedersBuffs(buffs);
+            } else if (hasRamenBuff) {
+                updateRamenBuffs(buffs);
             } else {
                 updateGenericBuffs(buffs);
             }
@@ -671,6 +674,47 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
+
+    private void updateRamenBuffs(JSONArray buffs) throws JSONException {
+        StringBuilder effectStr = new StringBuilder();
+        String urafType = "";
+        String urafState = "";
+
+        for (int i = 0; i < buffs.length(); i++) {
+            JSONObject b = buffs.getJSONObject(i);
+            String name = b.optString("name", "");
+            String type = b.optString("type", "");
+
+            if ("Ramen".equals(type)) {
+                if (name.startsWith("裏風:")) {
+                    urafType = name;
+                    urafState = b.optString("state", "");
+                } else {
+                    // Active effect: name=出汁/醤油/味噌 etc, EffectValue
+                    int val = b.optInt("EffectValue", 0);
+                    if (effectStr.length() > 0) effectStr.append(" ");
+                    effectStr.append(name);
+                    if (val > 0) effectStr.append(val);
+                }
+            }
+        }
+
+        if (tvBuffAo != null) {
+            tvBuffAo.setText(effectStr.length() > 0 ? effectStr.toString() : "");
+            tvBuffAo.setTextColor(0xFFFFCC00);
+        }
+        if (tvBuffMidori != null) {
+            tvBuffMidori.setText(urafType.isEmpty() ? "" : urafType);
+            tvBuffMidori.setTextColor(0xFFCC88FF);
+        }
+        if (tvBuffMomo != null) {
+            tvBuffMomo.setText(urafState.isEmpty() ? "" : "裏風:" + urafState);
+            tvBuffMomo.setTextColor(urafState.equals("有効") ? 0xFF00FF88 : 0xFF888888);
+        }
+        if (tvBuffDetail != null) {
+            tvBuffDetail.setVisibility(View.GONE);
+        }
+    }
     private void updateGenericBuffs(JSONArray buffs) throws JSONException {
         StringBuilder goodBuffs = new StringBuilder();
         StringBuilder badBuffs = new StringBuilder();
