@@ -1,8 +1,11 @@
 package com.umaai.assistant.service;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import android.util.Log;
+import android.widget.Toast;
 
 import org.json.JSONObject;
 
@@ -24,6 +27,7 @@ import java.util.Locale;
  * 2. /summary → summary_logs/{scenario}/（含buffs/active_effects等Ramen数据）
  *
  * 不做diff，每回合无条件存一份，育成结束后统一分析。
+ * 上传成功/失败通过Toast提示用户。
  */
 public class DebugLogSaver {
 
@@ -43,6 +47,8 @@ public class DebugLogSaver {
     private int lastMonth = -1;
     private int lastHalf = -1;
     private volatile boolean saving = false;
+    private int uploadOkCount = 0;
+    private int uploadFailCount = 0;
     /** 最近一次推送的/summary JSON原文，用于存GitHub */
     private volatile String lastSummaryJson = "";
 
@@ -72,8 +78,17 @@ public class DebugLogSaver {
             lastHalf = half;
 
             if (newTurn) {
-                Log.d(TAG, "New turn: " + month + "月" + half + "半, auto-saving...");
-                fetchAndSave(null);
+                String turnLabel = month + "月" + (half == 1 ? "前" : "後");
+                Log.d(TAG, "New turn: " + turnLabel + ", auto-saving...");
+                fetchAndSave((success, msg) -> {
+                    if (success) {
+                        uploadOkCount++;
+                        showToast("📤 " + currentScenario + " " + turnLabel + " 已上传(累計" + uploadOkCount + ")");
+                    } else {
+                        uploadFailCount++;
+                        showToast("❌ 上传失敗: " + msg + " (失敗" + uploadFailCount + "回)");
+                    }
+                });
                 return true;
             }
         } catch (Exception e) {
@@ -92,6 +107,12 @@ public class DebugLogSaver {
         fetchAndSave(callback);
     }
 
+    private void showToast(String text) {
+        new Handler(Looper.getMainLooper()).post(() ->
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        );
+    }
+
     private void fetchAndSave(SaveCallback callback) {
         if (saving) {
             if (callback != null) callback.onSaved(false, "正在保存中...");
@@ -102,8 +123,9 @@ public class DebugLogSaver {
             try {
                 // 1. 存 /debug/breeders
                 String debugResult = fetchUrl(DEBUG_URL);
+                boolean debugOk = false;
                 if (debugResult != null) {
-                    uploadToGitHub(debugResult, "debug_logs", "debug log");
+                    debugOk = uploadToGitHub(debugResult, "debug_logs", "debug log");
                 }
 
                 // 2. 存 /summary（优先用推送原文，否则重新拉取）
@@ -111,11 +133,14 @@ public class DebugLogSaver {
                 if (summaryResult == null || summaryResult.isEmpty()) {
                     summaryResult = fetchUrl(SUMMARY_URL);
                 }
+                boolean summaryOk = false;
                 if (summaryResult != null) {
-                    uploadToGitHub(summaryResult, "summary_logs", "summary");
+                    summaryOk = uploadToGitHub(summaryResult, "summary_logs", "summary");
                 }
 
-                if (callback != null) callback.onSaved(true, "已上传");
+                boolean allOk = debugOk && summaryOk;
+                String msg = allOk ? "已上传" : ("debug:" + (debugOk?"OK":"NG") + " summary:" + (summaryOk?"OK":"NG"));
+                if (callback != null) callback.onSaved(allOk, msg);
             } catch (Exception e) {
                 if (callback != null) callback.onSaved(false, e.getMessage());
             } finally {
@@ -143,6 +168,7 @@ public class DebugLogSaver {
                 return sb.toString();
             }
             conn.disconnect();
+            Log.e(TAG, "fetchUrl " + urlStr + " -> HTTP " + code);
         } catch (Exception e) {
             Log.e(TAG, "fetchUrl " + urlStr + ": " + e.getMessage());
         }
