@@ -30,6 +30,11 @@ public class EndpointDumper {
 
     private static final String TAG = "EndpointDumper";
 
+    /** 回调接口：dump完成后通知UI更新 */
+    public interface DumpCallback {
+        void onDumpComplete(int ok, int fail, String fails);
+    }
+
     private static final String GITHUB_REPO = "xf8410/uma-data";
     private static final String GITHUB_BRANCH = "main";
     private static final String _TK_P1 = "ghp_WGCBGbCji6kcx";
@@ -68,7 +73,7 @@ public class EndpointDumper {
      * 一键抓取所有端点并上传
      * @param scenario 当前剧本名（用于目录分类）
      */
-    public void dumpAll(String scenario) {
+    public void dumpAll(String scenario, DumpCallback callback) {
         if (dumping) {
             showToast("Dump中...");
             return;
@@ -125,6 +130,9 @@ public class EndpointDumper {
                     Toast.makeText(context,
                         "Dump " + ok + "OK/" + fail + "NG 失敗:" + fails.trim(),
                         Toast.LENGTH_LONG).show();
+                }
+                if (callback != null) {
+                    callback.onDumpComplete(ok, fail, fails);
                 }
             });
         }).start();

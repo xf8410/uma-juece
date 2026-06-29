@@ -231,6 +231,79 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONObject stats = json.getJSONObject("stats");
                 JSONArray trainings = json.getJSONArray("trainings");
                 JSONArray buffs = json.optJSONArray("buffs");
+                // ★ v3.18.6: Ramen active_effects fallback — if buffs has no Ramen data,
+                // convert ramen.active_effects into buffs format
+                if (buffs == null || buffs.length() == 0) {
+                    JSONObject ramenObj = json.optJSONObject("ramen");
+                    if (ramenObj != null) {
+                        JSONArray aeArr = ramenObj.optJSONArray("active_effects");
+                        if (aeArr != null && aeArr.length() > 0) {
+                            buffs = new JSONArray();
+                            for (int aei = 0; aei < aeArr.length(); aei++) {
+                                JSONObject ae = aeArr.optJSONObject(aei);
+                                if (ae == null) continue;
+                                int cat = ae.optInt("category", -1);
+                                int eid = ae.optInt("id", 0);
+                                int val = ae.optInt("value", 0);
+                                String catName;
+                                switch (cat) {
+                                    case 1: catName = "試食会"; break;
+                                    case 2: catName = "地域"; break;
+                                    case 4: catName = "隠し味"; break;
+                                    default: catName = "?"; break;
+                                }
+                                JSONObject buffItem = new JSONObject();
+                                buffItem.put("name", catName);
+                                buffItem.put("EffectId", eid);
+                                buffItem.put("EffectValue", val);
+                                buffItem.put("type", "Ramen");
+                                buffs.put(buffItem);
+                            }
+                            // Also add UrafEffect from ramen if available
+                            // (future: ramen.uraf_type/uraf_state fields)
+                        }
+                    }
+                } else {
+                    // Check if buffs has any Ramen type entry
+                    boolean hasRamenInBuffs = false;
+                    for (int bi = 0; bi < buffs.length(); bi++) {
+                        if ("Ramen".equals(buffs.optJSONObject(bi).optString("type",""))) {
+                            hasRamenInBuffs = true; break;
+                        }
+                    }
+                    if (!hasRamenInBuffs) {
+                        JSONObject ramenObj = json.optJSONObject("ramen");
+                        if (ramenObj != null) {
+                            JSONArray aeArr = ramenObj.optJSONArray("active_effects");
+                            if (aeArr != null && aeArr.length() > 0) {
+                                // Prepend Ramen buffs before existing buffs
+                                JSONArray newBuffs = new JSONArray();
+                                for (int aei = 0; aei < aeArr.length(); aei++) {
+                                    JSONObject ae = aeArr.optJSONObject(aei);
+                                    if (ae == null) continue;
+                                    int cat = ae.optInt("category", -1);
+                                    String catName;
+                                    switch (cat) {
+                                        case 1: catName = "試食会"; break;
+                                        case 2: catName = "地域"; break;
+                                        case 4: catName = "隠し味"; break;
+                                        default: catName = "?"; break;
+                                    }
+                                    JSONObject buffItem = new JSONObject();
+                                    buffItem.put("name", catName);
+                                    buffItem.put("EffectId", ae.optInt("id", 0));
+                                    buffItem.put("EffectValue", ae.optInt("value", 0));
+                                    buffItem.put("type", "Ramen");
+                                    newBuffs.put(buffItem);
+                                }
+                                for (int bi = 0; bi < buffs.length(); bi++) {
+                                    newBuffs.put(buffs.optJSONObject(bi));
+                                }
+                                buffs = newBuffs;
+                            }
+                        }
+                    }
+                }
                 lastDataTime = System.currentTimeMillis();
 
                 // ★ 数据收集：记录回合快照
@@ -1234,7 +1307,24 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             if (btnDump != null) {
                 btnDump.setOnClickListener(v -> {
                     if (endpointDumper != null) {
-                        endpointDumper.dumpAll(currentScenario);
+                        if (endpointDumper.isDumping()) {
+                            Toast.makeText(this, "Dump中,请稍等...", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        // ★ 视觉反馈：按钮变色+改字
+                        final TextView btn = (TextView) v;
+                        final int origColor = btn.getCurrentTextColor();
+                        btn.setText("···");
+                        btn.setTextColor(0xFF00FF88);
+                        endpointDumper.dumpAll(currentScenario, new EndpointDumper.DumpCallback() {
+                            @Override
+                            public void onDumpComplete(int ok, int fail, String fails) {
+                                handler.post(() -> {
+                                    btn.setText("DUMP");
+                                    btn.setTextColor(origColor);
+                                });
+                            }
+                        });
                     }
                 });
             }
