@@ -253,9 +253,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                     default: catName = "?"; break;
                                 }
                                 JSONObject buffItem = new JSONObject();
-                                buffItem.put("name", catName);
+                                buffItem.put("name", catName + "#" + eid);
                                 buffItem.put("EffectId", eid);
                                 buffItem.put("EffectValue", val);
+                                buffItem.put("desc", "+" + val + "%");
                                 buffItem.put("type", "Ramen");
                                 buffs.put(buffItem);
                             }
@@ -290,9 +291,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                         default: catName = "?"; break;
                                     }
                                     JSONObject buffItem = new JSONObject();
-                                    buffItem.put("name", catName);
-                                    buffItem.put("EffectId", ae.optInt("id", 0));
-                                    buffItem.put("EffectValue", ae.optInt("value", 0));
+                                    int aeId = ae.optInt("id", 0);
+                                    int aeVal = ae.optInt("value", 0);
+                                    buffItem.put("name", catName + "#" + aeId);
+                                    buffItem.put("EffectId", aeId);
+                                    buffItem.put("EffectValue", aeVal);
+                                    buffItem.put("desc", "+" + aeVal + "%");
                                     buffItem.put("type", "Ramen");
                                     newBuffs.put(buffItem);
                                 }
@@ -863,11 +867,16 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     urafType = name;
                     urafState = b.optString("state", "");
                 } else {
-                    // Active effect: name=出汁/醤油/味噌 etc, EffectValue
+                    // ★ v3.18.8: show desc (+XX%) if available, else name+val
+                    String desc = b.optString("desc", "");
                     int val = b.optInt("EffectValue", 0);
                     if (effectStr.length() > 0) effectStr.append(" ");
-                    effectStr.append(name);
-                    if (val > 0) effectStr.append(val);
+                    if (!desc.isEmpty()) {
+                        effectStr.append(name).append(desc);
+                    } else {
+                        effectStr.append(name);
+                        if (val > 0) effectStr.append(val);
+                    }
                 }
             }
         }
