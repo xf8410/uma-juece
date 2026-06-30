@@ -273,6 +273,8 @@ public class DataCollector {
             if (ai != null) {
                 s.aiBest = ai.optString("best", "");
                 s.aiScore = ai.optInt("score", 0);
+                s.skillEval = ai.optInt("skill_eval", 0);
+                s.skillCount = ai.optInt("skill_count", 0);
             }
 
             return s;
@@ -534,6 +536,8 @@ public class DataCollector {
         TrainingOption[] trainings;
         String aiBest;
         int aiScore;
+        int skillEval;
+        int skillCount;
 
         // 检测结果
         String actionTaken = "Unknown";
@@ -589,6 +593,8 @@ public class DataCollector {
                 JSONObject ai = new JSONObject();
                 ai.put("best", aiBest);
                 ai.put("score", aiScore);
+                ai.put("skill_eval", skillEval);
+                ai.put("skill_count", skillCount);
                 o.put("ai_recommend", ai);
             }
 

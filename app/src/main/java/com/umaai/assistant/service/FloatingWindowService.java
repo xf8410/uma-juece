@@ -508,6 +508,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         try {
             int score = ai.optInt("score", 0);
             int totalStats = ai.optInt("total_stats", 0);
+            int skillEval = ai.optInt("skill_eval", 0);
+            int skillCount = ai.optInt("skill_count", 0);
             String best = ai.optString("best", "");
             double bestV = ai.optDouble("best_v", 0);
             JSONObject train = ai.optJSONObject("train");
@@ -541,6 +543,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 sb.append(" 外").append(fmtAiVal(outgoingV));
                 if (totalStats > 0) {
                     sb.append(" 五維").append(totalStats);
+                }
+                if (skillEval > 0) {
+                    sb.append(" 技能").append(skillEval);
                 }
                 tvAiDetail.setText(sb.toString());
                 tvAiDetail.setVisibility(View.VISIBLE);
