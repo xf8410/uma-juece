@@ -1307,8 +1307,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             if (btnDump != null) {
                 btnDump.setOnClickListener(v -> {
                     if (endpointDumper != null) {
+                        // ★ v3.18.8: dumping中再点=取消
                         if (endpointDumper.isDumping()) {
-                            Toast.makeText(this, "Dump中,请稍等...", Toast.LENGTH_SHORT).show();
+                            endpointDumper.cancel();
+                            final TextView btn = (TextView) v;
+                            btn.setText("DUMP");
                             return;
                         }
                         // ★ 视觉反馈：按钮变色+改字

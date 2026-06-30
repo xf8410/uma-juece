@@ -22,9 +22,11 @@ import java.util.Locale;
 /**
  * 一键Dump插件所有端点数据到GitHub
  *
- * 抓取 /summary, /debug/breeders, /scenario, /skilldata, /carddb,
- * /status, /data, /debug/params 等端点，
+ * v3.18.8: 请求间隔500ms + 总超时90s + 防止游戏卡死
+ * 抓取 /summary, /scenario, /skilldata, /carddb,
+ * /status, /data, /saddles-dl, /health 等端点，
  * 全部上传到 uma-data/dumps/{scenario}/{timestamp}/ 目录。
+ * debug端点(/debug/breeders, /debug/params)默认跳过，长请求容易卡游戏。
  */
 public class EndpointDumper {
 
@@ -44,22 +46,28 @@ public class EndpointDumper {
     private static final String BASE_URL = "http://127.0.0.1:18765";
 
     // 要抓取的端点列表（路径 -> 文件名）
+    // v3.18.8: 移除/debug/breeders和/debug/params，这两个重端点容易卡游戏
+    // 如需debug数据，单独请求即可
     private static final String[][] ENDPOINTS = {
         {"/summary",           "summary.json"},
-        {"/debug/breeders",    "debug_breeders.json"},
         {"/scenario",          "scenario.json"},
         {"/skilldata",         "skilldata.json"},
         {"/carddb",            "carddb.json"},
         {"/status",            "status.json"},
         {"/data",              "data.json"},
-        {"/debug/params",      "debug_params.json"},
         {"/saddles-dl",        "saddles.json"},
         {"/health",            "health.json"},
         {"/log",               "log.json"},
     };
 
+    // ★ v3.18.8: 请求间隔ms，防止连续请求压垮插件HTTP服务器
+    private static final int REQUEST_INTERVAL_MS = 500;
+    // ★ v3.18.8: 总超时ms，超时强制结束
+    private static final long TOTAL_TIMEOUT_MS = 90_000;
+
     private Context context;
     private volatile boolean dumping = false;
+    private volatile boolean cancelled = false;
 
     public EndpointDumper(Context context) {
         this.context = context;
@@ -67,6 +75,14 @@ public class EndpointDumper {
 
     public boolean isDumping() {
         return dumping;
+    }
+
+    /** 取消正在进行的dump */
+    public void cancel() {
+        if (dumping) {
+            cancelled = true;
+            showToast("Dump取消中...");
+        }
     }
 
     /**
@@ -79,20 +95,41 @@ public class EndpointDumper {
             return;
         }
         dumping = true;
+        cancelled = false;
         String scenarioDir = (scenario != null && !scenario.isEmpty()) ? scenario : "Unknown";
 
         showToast("Dump開始 (" + ENDPOINTS.length + "端点)...");
 
         new Thread(() -> {
+            long startTime = System.currentTimeMillis();
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
             String dirPath = "dumps/" + scenarioDir + "/" + timestamp;
             int okCount = 0;
             int failCount = 0;
             StringBuilder failNames = new StringBuilder();
 
-            for (String[] ep : ENDPOINTS) {
+            for (int i = 0; i < ENDPOINTS.length; i++) {
+                // ★ 检查取消
+                if (cancelled) {
+                    Log.w(TAG, "Dump cancelled by user");
+                    break;
+                }
+                // ★ 检查总超时
+                if (System.currentTimeMillis() - startTime > TOTAL_TIMEOUT_MS) {
+                    Log.w(TAG, "Dump total timeout exceeded");
+                    failNames.append("(timeout) ");
+                    break;
+                }
+
+                String[] ep = ENDPOINTS[i];
                 String path = ep[0];
                 String filename = ep[1];
+
+                // ★ 请求间隔（首个不等待）
+                if (i > 0) {
+                    try { Thread.sleep(REQUEST_INTERVAL_MS); } catch (InterruptedException ignored) { break; }
+                }
+
                 try {
                     String data = fetchUrl(BASE_URL + path);
                     if (data != null && data.length() > 2) {
@@ -121,16 +158,18 @@ public class EndpointDumper {
             final int ok = okCount;
             final int fail = failCount;
             final String fails = failNames.toString();
+            final boolean wasCancelled = cancelled;
             handler().post(() -> {
-                if (fail == 0) {
-                    Toast.makeText(context,
-                        "Dump完了! " + ok + "端点上传成功",
-                        Toast.LENGTH_SHORT).show();
+                String msg;
+                if (wasCancelled) {
+                    msg = "Dump取消! " + ok + "OK/" + fail + "NG";
+                } else if (fail == 0) {
+                    msg = "Dump完了! " + ok + "端点上传成功";
                 } else {
-                    Toast.makeText(context,
-                        "Dump " + ok + "OK/" + fail + "NG 失敗:" + fails.trim(),
-                        Toast.LENGTH_LONG).show();
+                    msg = "Dump " + ok + "OK/" + fail + "NG 失敗:" + fails.trim();
                 }
+                Toast.makeText(context, msg,
+                    fail > 0 || wasCancelled ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
                 if (callback != null) {
                     callback.onDumpComplete(ok, fail, fails);
                 }
@@ -152,7 +191,7 @@ public class EndpointDumper {
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(3000);
-            conn.setReadTimeout(10000);
+            conn.setReadTimeout(8000); // ★ v3.18.8: 10s→8s，减少卡住时间
             int code = conn.getResponseCode();
             if (code == 200) {
                 BufferedReader reader = new BufferedReader(
