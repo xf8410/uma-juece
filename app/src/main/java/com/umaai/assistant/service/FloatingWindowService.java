@@ -495,8 +495,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             case "Legends": return "传奇杯";
             case "DesertIsland": return "无人岛杯";
             case "HotSpring": return "温泉杯";
-            case "Dreams":
-            case "TeamRace": return "育马者杯";
+            case "Dreams": return "育马者杯";
             case "Ramen": return "拉面杯";
             default: return id;
         }
@@ -687,7 +686,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private void updateTeamMembers(JSONObject json) {
         String scenario = json.optString("scenario", "");
-        if (!"Dreams".equals(scenario) && !"TeamRace".equals(scenario)) {
+        if (!"Dreams".equals(scenario)) {
             if (teamContainer != null) teamContainer.setVisibility(View.GONE);
             return;
         }
@@ -1159,7 +1158,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("Connection", "keep-alive");
             conn.setConnectTimeout(1500);
             conn.setReadTimeout(1500);
             int code = conn.getResponseCode();

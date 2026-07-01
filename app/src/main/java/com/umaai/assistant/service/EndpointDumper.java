@@ -186,34 +186,27 @@ public class EndpointDumper {
     }
 
     private String fetchUrl(String urlStr) {
-        // 重试最多2次
-        for (int attempt = 0; attempt <= 2; attempt++) {
-            try {
-                URL url = new URL(urlStr);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("Connection", "keep-alive");
-                conn.setConnectTimeout(3000);
-                conn.setReadTimeout(8000); // ★ v3.18.8: 10s→8s，减少卡住时间
-                int code = conn.getResponseCode();
-                if (code == 200) {
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(conn.getInputStream(), "UTF-8"));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) sb.append(line);
-                    reader.close();
-                    conn.disconnect();
-                    return sb.toString();
-                }
+        try {
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(8000); // ★ v3.18.8: 10s→8s，减少卡住时间
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
                 conn.disconnect();
-                Log.w(TAG, "fetchUrl " + urlStr + " -> HTTP " + code);
-            } catch (Exception e) {
-                Log.e(TAG, "fetchUrl " + urlStr + " (attempt " + attempt + "): " + e.getMessage());
-                if (attempt < 2) {
-                    try { Thread.sleep(500); } catch (InterruptedException ie) { break; }
-                }
+                return sb.toString();
             }
+            conn.disconnect();
+            Log.w(TAG, "fetchUrl " + urlStr + " -> HTTP " + code);
+        } catch (Exception e) {
+            Log.e(TAG, "fetchUrl " + urlStr + ": " + e.getMessage());
         }
         return null;
     }
@@ -236,7 +229,6 @@ public class EndpointDumper {
             conn.setRequestProperty("Authorization", "token " + GITHUB_TOKEN);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-            conn.setRequestProperty("Connection", "keep-alive");
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
             conn.setDoOutput(true);

@@ -154,7 +154,6 @@ public class DebugLogSaver {
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("Connection", "keep-alive");
             conn.setConnectTimeout(3000);
             conn.setReadTimeout(5000);
             int code = conn.getResponseCode();
@@ -198,7 +197,6 @@ public class DebugLogSaver {
             conn.setRequestProperty("Authorization", "token " + GITHUB_TOKEN);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-            conn.setRequestProperty("Connection", "keep-alive");
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
             conn.setDoOutput(true);

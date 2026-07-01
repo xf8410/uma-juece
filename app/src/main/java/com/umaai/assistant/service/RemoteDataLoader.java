@@ -106,7 +106,6 @@ public class RemoteDataLoader {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("Connection", "keep-alive");
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(60000); // 事件数据大，延长超时
 
