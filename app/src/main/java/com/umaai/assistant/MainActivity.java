@@ -13,6 +13,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.content.pm.PackageManager;
 import android.widget.Toast;
 
 import com.umaai.assistant.service.DataCollector;
@@ -203,7 +204,20 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static final int POST_NOTIFICATIONS_REQUEST = 456;
+
     private void startFloatingService() {
+        // Android 13+ 需要POST_NOTIFICATIONS权限才能显示前台服务通知
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[]{"android.permission.POST_NOTIFICATIONS"},
+                        POST_NOTIFICATIONS_REQUEST);
+                // 权限请求异步返回，先启动服务（通知可能不显示，但服务仍可运行）
+            }
+        }
+
         Intent intent = new Intent(this, FloatingWindowService.class);
         // 传入当前选择的剧本
         intent.putExtra("scenario", getSelectedScenario());

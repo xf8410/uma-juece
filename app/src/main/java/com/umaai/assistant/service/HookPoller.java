@@ -103,6 +103,7 @@ public class HookPoller {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
+            conn.setRequestProperty("Connection", "keep-alive");
             conn.setConnectTimeout(1500);
             conn.setReadTimeout(1500);
 

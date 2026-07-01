@@ -15,8 +15,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import java.util.UUID;
 
 /**
@@ -73,7 +73,7 @@ public class DataCollector {
     private Context context;
     private String sessionId;
     private String scenario;
-    private List<TurnSnapshot> turns = new ArrayList<>();
+    private CopyOnWriteArrayList<TurnSnapshot> turns = new CopyOnWriteArrayList<>();
     private TurnSnapshot prevSnapshot = null;
 
     // 上传回调
@@ -205,7 +205,7 @@ public class DataCollector {
             s.skillPt = stats.optInt("skill_point", 0);
             s.vital = stats.optInt("vital", 50);
             s.maxVital = stats.optInt("max_vital", 100);
-            s.motivation = stats.optInt("motivation", 3);
+            s.motivation = parseMotivation(stats.optString("motivation", "Normal"));
 
             // 训练选项
             JSONArray trainings = json.optJSONArray("trainings");
@@ -275,6 +275,26 @@ public class DataCollector {
                 s.aiScore = ai.optInt("score", 0);
                 s.skillEval = ai.optInt("skill_eval", 0);
                 s.skillCount = ai.optInt("skill_count", 0);
+            }
+
+            // Skills (v3.19.2新增)
+            JSONObject skills = json.optJSONObject("skills");
+            if (skills != null) {
+                s.skillEval = skills.optInt("eval", s.skillEval);
+                s.skillCount = skills.optInt("count", s.skillCount);
+                JSONArray skillList = skills.optJSONArray("list");
+                if (skillList != null) {
+                    s.skillsRaw = skillList.toString();
+                }
+            }
+
+            // Fan (粉丝数)
+            s.fan = json.optInt("fan", 0);
+
+            // Support cards (支援卡)
+            JSONArray supportCards = json.optJSONArray("support_cards");
+            if (supportCards != null) {
+                s.supportCardsRaw = supportCards.toString();
             }
 
             return s;
@@ -388,6 +408,23 @@ public class DataCollector {
         }
     }
 
+    /** 干劲String → int映射 (Rust SO输出为String, 对齐内部int表示)
+     *  Best=5, Good=4, Normal=3, Bad=2, Worst=1
+     */
+    private static int parseMotivation(String mot) {
+        if (mot == null || mot.isEmpty()) return 3;
+        switch (mot) {
+            case "Best": return 5;
+            case "Good": return 4;
+            case "Normal": return 3;
+            case "Bad": return 2;
+            case "Worst": return 1;
+            default:
+                // 尝试解析为数字（兼容旧版本int输出）
+                try { return Integer.parseInt(mot); } catch (NumberFormatException e) { return 3; }
+        }
+    }
+
     // ========================================================================
     // 数据导出 & 上传
     // ========================================================================
@@ -459,60 +496,73 @@ public class DataCollector {
 
     /**
      * 上传数据到 GitHub uma-data/training_sessions/
+     * HTTP重试上传（最多2次，间隔1秒）
      */
     private void uploadToGitHub(String jsonContent) {
         new Thread(() -> {
-            try {
-                // 按剧本分目录：training_sessions/{scenario}/{sessionId}.json
-                String scenarioDir = (scenario != null && !scenario.isEmpty()) ? scenario : "Unknown";
-                String filename = sessionId + ".json";
-                String path = GITHUB_PATH + "/" + scenarioDir + "/" + filename;
-                String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
+            int maxRetries = 2;
+            for (int attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    // 按剧本分目录：training_sessions/{scenario}/{sessionId}.json
+                    String scenarioDir = (scenario != null && !scenario.isEmpty()) ? scenario : "Unknown";
+                    String filename = sessionId + ".json";
+                    String path = GITHUB_PATH + "/" + scenarioDir + "/" + filename;
+                    String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
 
-                // Base64 encode content
-                String encoded = Base64.encodeToString(
-                    jsonContent.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+                    // Base64 encode content
+                    String encoded = Base64.encodeToString(
+                        jsonContent.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
 
-                JSONObject body = new JSONObject();
-                body.put("message", "Add training session " + sessionId
-                    + " (" + turns.size() + " turns, " + scenarioDir + ")");
-                body.put("content", encoded);
-                body.put("branch", GITHUB_BRANCH);
+                    JSONObject body = new JSONObject();
+                    body.put("message", "Add training session " + sessionId
+                        + " (" + turns.size() + " turns, " + scenarioDir + ")");
+                    body.put("content", encoded);
+                    body.put("branch", GITHUB_BRANCH);
 
-                URL url = new URL(apiUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("PUT");
-                conn.setRequestProperty("Authorization", "token " + GITHUB_TOKEN);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(30000);
-                conn.setDoOutput(true);
+                    URL url = new URL(apiUrl);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("PUT");
+                    conn.setRequestProperty("Authorization", "token " + GITHUB_TOKEN);
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+                    conn.setRequestProperty("Connection", "keep-alive");
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setDoOutput(true);
 
-                OutputStream os = conn.getOutputStream();
-                os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                os.flush();
-                os.close();
+                    OutputStream os = conn.getOutputStream();
+                    os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
 
-                int code = conn.getResponseCode();
-                if (code == 200 || code == 201) {
-                    Log.d(TAG, "Upload success: " + filename);
-                    // 上传成功后清除本地数据
-                    startNewSession();
-                } else {
-                    BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getErrorStream(), "UTF-8"));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) sb.append(line);
-                    reader.close();
-                    Log.e(TAG, "Upload failed (" + code + "): " + sb.toString());
-                    // 保留数据，下次重试
+                    int code = conn.getResponseCode();
+                    if (code == 200 || code == 201) {
+                        Log.d(TAG, "Upload success: " + filename);
+                        startNewSession();
+                        conn.disconnect();
+                        return; // 成功，退出重试循环
+                    } else {
+                        BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(conn.getErrorStream(), "UTF-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) sb.append(line);
+                        reader.close();
+                        Log.e(TAG, "Upload failed (" + code + "): " + sb.toString());
+                        conn.disconnect();
+                        if (attempt < maxRetries) {
+                            Log.d(TAG, "Retry " + (attempt + 1) + "/" + maxRetries + " in 1s...");
+                            Thread.sleep(1000);
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Exception e) {
+                    Log.e(TAG, "Upload error (attempt " + attempt + "): " + e.getMessage());
+                    if (attempt < maxRetries) {
+                        try { Thread.sleep(1000); } catch (InterruptedException ie) { break; }
+                    }
                 }
-                conn.disconnect();
-
-            } catch (Exception e) {
-                Log.e(TAG, "Upload error: " + e.getMessage());
             }
         }).start();
     }
@@ -538,6 +588,9 @@ public class DataCollector {
         int aiScore;
         int skillEval;
         int skillCount;
+        String skillsRaw;       // v3.19.2: skills.list JSON array
+        int fan;                // v3.19.2: fan count
+        String supportCardsRaw; // v3.19.2: support_cards JSON array
 
         // 检测结果
         String actionTaken = "Unknown";
@@ -587,6 +640,25 @@ public class DataCollector {
             }
 
             o.put("action_taken", actionTaken != null ? actionTaken : "Unknown");
+
+            // Skills (v3.19.2)
+            if (skillsRaw != null && !skillsRaw.isEmpty()) {
+                o.put("skills", new JSONArray(skillsRaw));
+            }
+            JSONObject skillsSummary = new JSONObject();
+            skillsSummary.put("eval", skillEval);
+            skillsSummary.put("count", skillCount);
+            o.put("skills_summary", skillsSummary);
+
+            // Fan
+            if (fan > 0) {
+                o.put("fan", fan);
+            }
+
+            // Support cards
+            if (supportCardsRaw != null && !supportCardsRaw.isEmpty()) {
+                o.put("support_cards", new JSONArray(supportCardsRaw));
+            }
 
             // AI推荐
             if (aiBest != null && !aiBest.isEmpty()) {

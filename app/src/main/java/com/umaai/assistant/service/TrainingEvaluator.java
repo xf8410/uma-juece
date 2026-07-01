@@ -136,7 +136,8 @@ public class TrainingEvaluator {
             case "Legends": return TRAIN_TYPE_BONUS_LEGENDS;
             case "DesertIsland": return TRAIN_TYPE_BONUS_DESERT;
             case "HotSpring": return TRAIN_TYPE_BONUS_HOTSPRING;
-            case "Dreams": return TRAIN_TYPE_BONUS_DREAMS;
+            case "Dreams":
+            case "TeamRace": return TRAIN_TYPE_BONUS_DREAMS;
             case "Ramen": return TRAIN_TYPE_BONUS_DEFAULT; // TODO: 拉面杯专用参数待实测
             default: return TRAIN_TYPE_BONUS_DEFAULT;
         }
@@ -156,7 +157,8 @@ public class TrainingEvaluator {
             case "Legends": return FINAL_BONUS_LEGENDS;
             case "DesertIsland": return FINAL_BONUS_DESERT;
             case "HotSpring": return FINAL_BONUS_HOTSPRING;
-            case "Dreams": return FINAL_BONUS_DREAMS;
+            case "Dreams":
+            case "TeamRace": return FINAL_BONUS_DREAMS;
             case "Ramen": return FINAL_BONUS_DEFAULT; // TODO: 拉面杯专用参数待实测
             default: return FINAL_BONUS_DEFAULT;
         }
@@ -457,6 +459,7 @@ public class TrainingEvaluator {
                 break;
 
             case "Dreams":
+            case "TeamRace":
                 // 育马者杯: 队员等级加成 + 魂爆加成
                 // 每个队员按等级提供10%-30%训练加成，魂爆+30%
                 // 队伍等级影响友情加成/得意率/启示事件率
