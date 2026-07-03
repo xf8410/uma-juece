@@ -250,7 +250,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                     case 1: catName = "試食会"; break;
                                     case 2: catName = "地域"; break;
                                     case 4: catName = "隠し味"; break;
-                                    default: catName = "?"; break;
+                                    default: catName = "Cat" + cat; break;
                                 }
                                 JSONObject buffItem = new JSONObject();
                                 buffItem.put("name", catName + "#" + eid);
@@ -288,7 +288,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                         case 1: catName = "試食会"; break;
                                         case 2: catName = "地域"; break;
                                         case 4: catName = "隠し味"; break;
-                                        default: catName = "?"; break;
+                                        default: catName = "Cat" + cat; break;
                                     }
                                     JSONObject buffItem = new JSONObject();
                                     int aeId = ae.optInt("id", 0);
