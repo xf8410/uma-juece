@@ -20,13 +20,14 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 赛马娘育成数据收集器 v1.0
+ * 赛马娘育成数据收集器 v1.1
  *
  * 工作流程：
  *   1. 每次收到 /summary 数据，记录当前回合快照
  *   2. 与上一回合快照对比，自动检测玩家选择的行动
- *   3. 育成结束时（回合重置/剧本切换），汇总整局数据
- *   4. 上传到 GitHub uma-data/training_sessions/
+ *   3. ★ v3.22.27: 每检测到新回合，立即上传当前整局数据（覆盖同一文件）
+ *   4. 育成结束时（回合重置/剧本切换），上传最终数据
+ *   5. 上传到 GitHub uma-data/training_sessions/
  *
  * 数据格式（用于后续 NN 训练）：
  *   每局一个JSON文件，包含：
@@ -157,12 +158,12 @@ public class DataCollector {
                 // 记录上一回合的行动
                 prevSnapshot.actionTaken = detectedAction;
                 turns.add(prevSnapshot);
+
+                // ★ v3.22.27: 每回合上传（覆盖同一文件），App崩了最多丢当前回合
+                uploadCurrentSession(false);
             } else if (prevSnapshot != null && snapshot.turn == prevSnapshot.turn) {
-                // 同回合内的数据更新（如训练伙伴变化），覆盖
+                // 同回合内的数据更新（如训练伙伴变化），只更新prevSnapshot不修改turns
                 snapshot.actionTaken = prevSnapshot.actionTaken;
-                if (!turns.isEmpty()) {
-                    turns.set(turns.size() - 1, snapshot);
-                }
             }
 
             // 更新scenario
@@ -205,7 +206,16 @@ public class DataCollector {
             s.skillPt = stats.optInt("skill_point", 0);
             s.vital = stats.optInt("vital", 50);
             s.maxVital = stats.optInt("max_vital", 100);
-            s.motivation = stats.optInt("motivation", 3);
+            // ★ v3.22.27: SO发送motivation为字符串(Best/Good/Normal/Bad/Worst)，需映射为int
+            String motStr = stats.optString("motivation", "Normal");
+            switch (motStr) {
+                case "Best":  s.motivation = 5; break;
+                case "Good":  s.motivation = 4; break;
+                case "Normal": s.motivation = 3; break;
+                case "Bad":   s.motivation = 2; break;
+                case "Worst": s.motivation = 1; break;
+                default:      s.motivation = 3; break;
+            }
 
             // 训练选项
             JSONArray trainings = json.optJSONArray("trainings");
@@ -407,38 +417,56 @@ public class DataCollector {
             turns.add(prevSnapshot);
         }
 
-        JSONObject sessionData = buildSessionJson();
+        uploadCurrentSession(true);
+    }
+
+    /**
+     * ★ v3.22.27: 上传当前session数据（每回合覆盖同一文件）
+     */
+    private void uploadCurrentSession(boolean isFinal) {
+        JSONObject sessionData = buildSessionJson(isFinal);
         if (sessionData == null) return;
 
         String jsonStr = sessionData.toString();
-        Log.d(TAG, "Session " + sessionId + " data: " + turns.size() + " turns, "
-            + jsonStr.length() + " chars");
+        Log.d(TAG, "Uploading session " + sessionId + ": " + turns.size()
+            + " turns, " + jsonStr.length() + " chars, isFinal=" + isFinal);
 
-        // 异步上传
-        uploadToGitHub(jsonStr);
+        uploadToGitHub(jsonStr, isFinal);
     }
 
     /**
      * 构建整局数据JSON
      */
-    private JSONObject buildSessionJson() {
+    private JSONObject buildSessionJson(boolean isFinal) {
         try {
             JSONObject session = new JSONObject();
             session.put("session_id", sessionId);
             session.put("scenario", scenario != null ? scenario : "Unknown");
             session.put("turn_count", turns.size());
             session.put("timestamp", System.currentTimeMillis());
+            session.put("is_final", isFinal);
 
             // 回合数据
             JSONArray turnsArr = new JSONArray();
             for (TurnSnapshot t : turns) {
                 turnsArr.put(t.toJson());
             }
+            // ★ 非final时，把当前进行中的回合也加进去（action=Unknown）
+            if (!isFinal && prevSnapshot != null) {
+                boolean inList = false;
+                for (int i = 0; i < turns.size(); i++) {
+                    if (turns.get(i) == prevSnapshot) { inList = true; break; }
+                }
+                if (!inList) {
+                    turnsArr.put(prevSnapshot.toJson());
+                }
+            }
             session.put("turns", turnsArr);
 
-            // 最终属性（最后一回合）
-            if (!turns.isEmpty()) {
-                TurnSnapshot last = turns.get(turns.size() - 1);
+            // 最终属性（当前最新回合）
+            TurnSnapshot last = prevSnapshot;
+            if (last == null && !turns.isEmpty()) last = turns.get(turns.size() - 1);
+            if (last != null) {
                 JSONObject finalStats = new JSONObject();
                 finalStats.put("speed", last.speed);
                 finalStats.put("stamina", last.stamina);
@@ -460,7 +488,7 @@ public class DataCollector {
     /**
      * 上传数据到 GitHub uma-data/training_sessions/
      */
-    private void uploadToGitHub(String jsonContent) {
+    private void uploadToGitHub(String jsonContent, boolean isFinal) {
         new Thread(() -> {
             try {
                 // 按剧本分目录：training_sessions/{scenario}/{sessionId}.json
@@ -469,15 +497,43 @@ public class DataCollector {
                 String path = GITHUB_PATH + "/" + scenarioDir + "/" + filename;
                 String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
 
+                // ★ v3.22.27: 先GET文件SHA（如果已存在），用于覆盖更新
+                String sha = null;
+                try {
+                    URL getUrl = new URL(apiUrl);
+                    HttpURLConnection getConn = (HttpURLConnection) getUrl.openConnection();
+                    getConn.setRequestMethod("GET");
+                    getConn.setRequestProperty("Authorization", "token " + GITHUB_TOKEN);
+                    getConn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+                    getConn.setConnectTimeout(10000);
+                    getConn.setReadTimeout(10000);
+                    if (getConn.getResponseCode() == 200) {
+                        BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(getConn.getInputStream(), "UTF-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) sb.append(line);
+                        reader.close();
+                        JSONObject existing = new JSONObject(sb.toString());
+                        sha = existing.optString("sha", null);
+                    }
+                    getConn.disconnect();
+                } catch (Exception e) {
+                    // 文件不存在，第一次上传
+                }
+
                 // Base64 encode content
                 String encoded = Base64.encodeToString(
                     jsonContent.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
 
                 JSONObject body = new JSONObject();
-                body.put("message", "Add training session " + sessionId
+                body.put("message", (isFinal ? "Finalize" : "Update") + " training session " + sessionId
                     + " (" + turns.size() + " turns, " + scenarioDir + ")");
                 body.put("content", encoded);
                 body.put("branch", GITHUB_BRANCH);
+                if (sha != null) {
+                    body.put("sha", sha);
+                }
 
                 URL url = new URL(apiUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -496,9 +552,11 @@ public class DataCollector {
 
                 int code = conn.getResponseCode();
                 if (code == 200 || code == 201) {
-                    Log.d(TAG, "Upload success: " + filename);
-                    // 上传成功后清除本地数据
-                    startNewSession();
+                    Log.d(TAG, "Upload success: " + filename + " (isFinal=" + isFinal + ")");
+                    // ★ 只有finalize才清除session
+                    if (isFinal) {
+                        startNewSession();
+                    }
                 } else {
                     BufferedReader reader = new BufferedReader(
                         new InputStreamReader(conn.getErrorStream(), "UTF-8"));
@@ -507,7 +565,6 @@ public class DataCollector {
                     while ((line = reader.readLine()) != null) sb.append(line);
                     reader.close();
                     Log.e(TAG, "Upload failed (" + code + "): " + sb.toString());
-                    // 保留数据，下次重试
                 }
                 conn.disconnect();
 
