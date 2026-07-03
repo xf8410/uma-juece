@@ -10,6 +10,8 @@ import android.widget.Toast;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -58,6 +60,7 @@ public class EndpointDumper {
         {"/saddles-dl",        "saddles.json"},
         {"/health",            "health.json"},
         {"/log",               "log.json"},
+        {"/mdb",               "master.mdb"},    // ★ v3.22.28: raw MasterDB
     };
 
     // ★ v3.18.8: 请求间隔ms，防止连续请求压垮插件HTTP服务器
@@ -131,21 +134,40 @@ public class EndpointDumper {
                 }
 
                 try {
-                    String data = fetchUrl(BASE_URL + path);
-                    if (data != null && data.length() > 2) {
-                        boolean uploaded = uploadToGitHub(data, dirPath + "/" + filename,
-                                "dump " + scenarioDir + " " + path);
-                        if (uploaded) {
-                            okCount++;
-                            Log.d(TAG, "Dump OK: " + path);
+                    // ★ v3.22.28: /mdb served as binary, other endpoints as text
+                    if ("/mdb".equals(path)) {
+                        byte[] binData = fetchUrlBinary(BASE_URL + path);
+                        if (binData != null && binData.length > 10) {
+                            boolean uploaded = uploadBinaryToGitHub(binData, dirPath + "/" + filename,
+                                    "dump mdb " + scenarioDir);
+                            if (uploaded) {
+                                okCount++;
+                                Log.d(TAG, "Dump OK: /mdb (" + binData.length + " bytes)");
+                            } else {
+                                failCount++;
+                                failNames.append(path).append(" ");
+                                Log.e(TAG, "Dump upload fail: /mdb");
+                            }
                         } else {
-                            failCount++;
-                            failNames.append(path).append(" ");
-                            Log.e(TAG, "Dump upload fail: " + path);
+                            Log.w(TAG, "Dump skip (no mdb data)");
                         }
                     } else {
-                        // 端点不可用，跳过不算失败
-                        Log.w(TAG, "Dump skip (no data): " + path);
+                        String data = fetchUrl(BASE_URL + path);
+                        if (data != null && data.length() > 2) {
+                            boolean uploaded = uploadToGitHub(data, dirPath + "/" + filename,
+                                    "dump " + scenarioDir + " " + path);
+                            if (uploaded) {
+                                okCount++;
+                                Log.d(TAG, "Dump OK: " + path);
+                            } else {
+                                failCount++;
+                                failNames.append(path).append(" ");
+                                Log.e(TAG, "Dump upload fail: " + path);
+                            }
+                        } else {
+                            // 端点不可用，跳过不算失败
+                            Log.w(TAG, "Dump skip (no data): " + path);
+                        }
                     }
                 } catch (Exception e) {
                     failCount++;
@@ -243,6 +265,71 @@ public class EndpointDumper {
             return code == 200 || code == 201;
         } catch (Exception e) {
             Log.e(TAG, "uploadToGitHub: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // ★ v3.22.28: Fetch binary data from SO endpoint (for /mdb)
+    private byte[] fetchUrlBinary(String urlStr) {
+        try {
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(60000); // mdb can be large, allow 60s
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                InputStream is = conn.getInputStream();
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                byte[] buffer = new byte[65536];
+                int len;
+                while ((len = is.read(buffer)) != -1) {
+                    baos.write(buffer, 0, len);
+                }
+                is.close();
+                conn.disconnect();
+                return baos.toByteArray();
+            }
+            conn.disconnect();
+            Log.w(TAG, "fetchUrlBinary " + urlStr + " -> HTTP " + code);
+        } catch (Exception e) {
+            Log.e(TAG, "fetchUrlBinary " + urlStr + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    // ★ v3.22.28: Upload binary data to GitHub (for mdb file)
+    private boolean uploadBinaryToGitHub(byte[] data, String path, String message) {
+        try {
+            String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
+
+            String encoded = Base64.encodeToString(data, Base64.NO_WRAP);
+
+            JSONObject body = new JSONObject();
+            body.put("message", message);
+            body.put("content", encoded);
+            body.put("branch", GITHUB_BRANCH);
+
+            URL url = new URL(apiUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("PUT");
+            conn.setRequestProperty("Authorization", "token " + GITHUB_TOKEN);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(120000); // mdb base64 can be 40MB+, allow 2min
+            conn.setDoOutput(true);
+
+            OutputStream os = conn.getOutputStream();
+            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.close();
+
+            int code = conn.getResponseCode();
+            conn.disconnect();
+            return code == 200 || code == 201;
+        } catch (Exception e) {
+            Log.e(TAG, "uploadBinaryToGitHub: " + e.getMessage());
             return false;
         }
     }
