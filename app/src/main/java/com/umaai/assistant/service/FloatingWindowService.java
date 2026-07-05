@@ -614,7 +614,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      * 更新队员显示区域（育马者杯专用）
      * 数据来自插件的 team_members 字段:
      *   "team_members": [{"chara_id":X, "level":3, "dream_gauge":2, "is_burst":false}, ...]
-     *   "team_rank": 3, "dream_training_left": 2
+     *   "team_rank": 3, "dream_left": 2
      */
     /**
      * 更新拉面杯剧本特有信息
