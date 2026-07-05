@@ -5,12 +5,15 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * 远程赛马娘数据加载器 v2
+ * 远程赛马娘数据加载器 v3
  * 
  * 数据源：
  *   API1 (k3ftlokgmwsms): names/skills/factors (小体积，快速)
@@ -27,20 +30,24 @@ import java.net.URL;
  *   [7] 保留
  *   [8] 羁绊增量
  *   [9] 干劲增量
+ * 
+ * ★ v3.22.58: 大文件改用文件缓存，不再受SP 2MB限制
  */
 public class RemoteDataLoader {
 
     private static final String TAG = "UmaData";
     public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
-    // GitHub raw: 零成本永久可用，不依赖第三方托管
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 2; // 升级版本号触发重新加载
+    private static final int CACHE_VERSION = 3; // 升级版本号触发重新加载
 
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";
     public static final String KEY_SKILLS = "skills";
     public static final String KEY_FACTORS = "factors";
-    public static final String KEY_CACHE_VER = "cache_version";
+    private static final String KEY_CACHE_VER = "cache_version";
+
+    // 文件缓存目录名
+    private static final String CACHE_DIR = "uma_data_cache";
 
     /**
      * 异步加载所有数据
@@ -49,14 +56,15 @@ public class RemoteDataLoader {
     public static void loadAll(Context ctx, DataCallback cb) {
         new Thread(() -> {
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            File cacheDir = getDataCacheDir(ctx);
 
             // API1: 小体积数据，直接拿JSON
-            boolean namesOk = loadAndCache(prefs, KEY_NAMES, DATA_BASE + "/uma_names.json");
-            boolean skillsOk = loadAndCache(prefs, KEY_SKILLS, DATA_BASE + "/uma_skills.json");
-            boolean factorsOk = loadAndCache(prefs, KEY_FACTORS, DATA_BASE + "/uma_factors.json");
+            boolean namesOk = loadAndCache(prefs, cacheDir, KEY_NAMES, DATA_BASE + "/uma_names.json");
+            boolean skillsOk = loadAndCache(prefs, cacheDir, KEY_SKILLS, DATA_BASE + "/uma_skills.json");
+            boolean factorsOk = loadAndCache(prefs, cacheDir, KEY_FACTORS, DATA_BASE + "/uma_factors.json");
 
             // API2: 事件数据（含Values数组，~12MB）
-            boolean eventsOk = loadAndCache(prefs, KEY_EVENTS, DATA_BASE + "/uma_events.json");
+            boolean eventsOk = loadAndCache(prefs, cacheDir, KEY_EVENTS, DATA_BASE + "/uma_events.json");
 
             if (namesOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
 
@@ -70,34 +78,90 @@ public class RemoteDataLoader {
 
     public static boolean isCached(Context ctx) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return prefs.getInt(KEY_CACHE_VER, 0) >= CACHE_VERSION
-                && prefs.getString(KEY_EVENTS, null) != null;
+        if (prefs.getInt(KEY_CACHE_VER, 0) < CACHE_VERSION) return false;
+        // events必须存在（文件或SP均可）
+        return getCachedData(ctx, KEY_EVENTS) != null;
     }
 
+    /** 获取缓存数据：优先从文件缓存读，fallback到SP */
     public static String getCachedData(Context ctx, String key) {
+        // 优先读文件缓存
+        File file = new File(getDataCacheDir(ctx), key + ".json");
+        if (file.exists() && file.length() > 10) {
+            try {
+                BufferedReader reader = new BufferedReader(new FileReader(file));
+                StringBuilder sb = new StringBuilder();
+                char[] buf = new char[8192];
+                int len;
+                while ((len = reader.read(buf)) != -1) {
+                    sb.append(buf, 0, len);
+                }
+                reader.close();
+                String data = sb.toString();
+                if (data.length() > 10) return data;
+            } catch (Exception e) {
+                Log.w(TAG, "File cache read failed for " + key + ": " + e.getMessage());
+            }
+        }
+
+        // Fallback到SP（兼容旧版本缓存）
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return prefs.getString(key, null);
+        String spData = prefs.getString(key, null);
+        if (spData != null && !spData.equals("LOADED_V2") && spData.length() > 10) {
+            // 迁移到文件缓存
+            saveToFileCache(getDataCacheDir(ctx), key, spData);
+            return spData;
+        }
+
+        return null;
     }
 
-    private static boolean loadAndCache(SharedPreferences prefs, String key, String urlStr) {
+    /** 获取文件缓存目录 */
+    private static File getDataCacheDir(Context ctx) {
+        File dir = new File(ctx.getFilesDir(), CACHE_DIR);
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private static boolean loadAndCache(SharedPreferences prefs, File cacheDir, String key, String urlStr) {
         String json = httpGet(urlStr);
         if (json != null && json.length() > 10) {
-            // 事件数据太大，SharedPreferences存不下（最大约2MB），直接用文件缓存
             if (json.length() > 1_500_000) {
-                // 大文件缓存方案：压缩只存关键信息
-                // 事件数据太大，标记为已加载但不在SP中存完整数据
-                // 后续按需查询
-                Log.d(TAG, key + " too large for SP (" + json.length() + " chars), saving summary");
-                prefs.edit().putString(key, "LOADED_V2").apply();
-                // TODO: 后续改为文件缓存或按需查询
-                return true;
+                // 大文件：写入文件缓存
+                if (saveToFileCache(cacheDir, key, json)) {
+                    // SP只存标记，不存实际数据
+                    prefs.edit().putString(key, "FILE_CACHED").apply();
+                    Log.d(TAG, key + " file cached: " + json.length() + " chars");
+                    return true;
+                } else {
+                    Log.e(TAG, key + " file cache write failed");
+                    return false;
+                }
             }
+            // 小文件：双写SP和文件缓存
             prefs.edit().putString(key, json).apply();
+            saveToFileCache(cacheDir, key, json);
             Log.d(TAG, key + " cached: " + json.length() + " chars");
             return true;
         }
         Log.w(TAG, key + " load failed");
-        return prefs.getString(key, null) != null;
+        // 加载失败时检查是否有文件缓存
+        File cached = new File(cacheDir, key + ".json");
+        return cached.exists() && cached.length() > 10;
+    }
+
+    private static boolean saveToFileCache(File cacheDir, String key, String json) {
+        try {
+            File file = new File(cacheDir, key + ".json");
+            FileOutputStream fos = new FileOutputStream(file);
+            fos.write(json.getBytes("UTF-8"));
+            fos.flush();
+            fos.close();
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "saveToFileCache failed: " + key + " - " + e.getMessage());
+            return false;
+        }
     }
 
     private static String httpGet(String urlStr) {

@@ -287,6 +287,15 @@ public class DataCollector {
                 s.skillCount = ai.optInt("skill_count", 0);
             }
 
+            // ★ v3.22.58: Ramen gauge_gains
+            JSONObject ramen = json.optJSONObject("ramen");
+            if (ramen != null) {
+                JSONArray gaugeGains = ramen.optJSONArray("gauge_gains");
+                if (gaugeGains != null && gaugeGains.length() > 0) {
+                    s.gaugeGainsRaw = gaugeGains.toString();
+                }
+            }
+
             return s;
         } catch (JSONException e) {
             Log.e(TAG, "parseSnapshot error: " + e.getMessage());
@@ -590,6 +599,7 @@ public class DataCollector {
         String buffsRaw;
         String trainingLevelsRaw;
         String evaluationRaw;
+        String gaugeGainsRaw; // ★ v3.22.58: Ramen gauge_gains data
         TrainingOption[] trainings;
         String aiBest;
         int aiScore;
@@ -653,6 +663,11 @@ public class DataCollector {
                 ai.put("skill_eval", skillEval);
                 ai.put("skill_count", skillCount);
                 o.put("ai_recommend", ai);
+            }
+
+            // ★ v3.22.58: Ramen gauge_gains
+            if (gaugeGainsRaw != null && !gaugeGainsRaw.isEmpty()) {
+                o.put("gauge_gains", new JSONArray(gaugeGainsRaw));
             }
 
             return o;

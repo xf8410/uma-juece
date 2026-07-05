@@ -768,7 +768,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         // 梦想训练剩余次数
         // 优先从插件读取，如果插件读不到则根据month/half计算
-        int dreamLeft = teamData != null ? teamData.optInt("dream_training_left", -1) : -1;
+        int dreamLeft = teamData != null ? teamData.optInt("dream_left", teamData.optInt("dream_training_left", -1)) : -1;
         if (dreamLeft < 0) {
             dreamLeft = calculateDreamTrainingLeft(json);
         }
