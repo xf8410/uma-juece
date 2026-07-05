@@ -677,6 +677,35 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             info.append("地域:").append(regionIds.length());
         }
 
+        // ★ v3.22.57: Gauge gains display — training gauge progress from SO
+        JSONArray gaugeGains = ramen.optJSONArray("gauge_gains");
+        if (gaugeGains != null && gaugeGains.length() > 0) {
+            StringBuilder ggStr = new StringBuilder();
+            for (int gi = 0; gi < gaugeGains.length(); gi++) {
+                JSONObject gg = gaugeGains.optJSONObject(gi);
+                if (gg == null) continue;
+                String gName = gg.optString("name", "");
+                int gVal = gg.optInt("gauge", 0);
+                if (gVal > 0) {
+                    if (ggStr.length() > 0) ggStr.append(" ");
+                    // Short label: 速+3 耐+1 etc.
+                    String shortName;
+                    switch (gName) {
+                        case "Speed": shortName = "速"; break;
+                        case "Stamina": shortName = "耐"; break;
+                        case "Power": shortName = "力"; break;
+                        case "Guts": shortName = "根"; break;
+                        case "Wiz": shortName = "智"; break;
+                        default: shortName = gName; break;
+                    }
+                    ggStr.append(shortName).append("+").append(gVal);
+                }
+            }
+            if (ggStr.length() > 0) {
+                info.append(" ゲージ:").append(ggStr);
+            }
+        }
+
         // Display in buff_detail area
         if (tvBuffDetail != null && info.length() > 0) {
             tvBuffDetail.setText(info.toString().trim());

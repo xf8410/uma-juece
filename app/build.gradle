@@ -11,8 +11,8 @@ android {
         applicationId "com.umaai.assistant"
         minSdk 26
         targetSdk 34
-        versionCode 32233
-        versionName "3.22.33"
+        versionCode 32257
+        versionName "3.22.57"
     }
 
     buildTypes {
