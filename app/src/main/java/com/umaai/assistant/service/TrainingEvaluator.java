@@ -184,6 +184,12 @@ public class TrainingEvaluator {
         CMD_TO_IDX.put(103, 3); // Guts
         CMD_TO_IDX.put(105, 2); // Power
         CMD_TO_IDX.put(106, 4); // Wisdom
+        // ★ v3.22.57: Ramen scenario uses 601-605 command IDs
+        CMD_TO_IDX.put(601, 0); // Ramen Speed
+        CMD_TO_IDX.put(602, 1); // Ramen Stamina
+        CMD_TO_IDX.put(603, 3); // Ramen Guts
+        CMD_TO_IDX.put(604, 2); // Ramen Power
+        CMD_TO_IDX.put(605, 4); // Ramen Wisdom
     }
 
     // ========================================================================
