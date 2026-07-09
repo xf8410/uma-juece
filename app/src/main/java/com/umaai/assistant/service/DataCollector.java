@@ -1,4 +1,5 @@
 package com.umaai.assistant.service;
+import com.umaai.assistant.BuildConfig;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -57,9 +58,7 @@ public class DataCollector {
     // 按剧本分目录：training_sessions/URA/, training_sessions/Aoharu/, ...
     private static final String GITHUB_PATH = "training_sessions";
     // Auto-configured upload token (split to avoid scanner)
-    private static final String _TK_P1 = "ghp_xkF4KaYR1isOHDCdlWmX";
-    private static final String _TK_P2 = "j8gkgfGTaS1YGIGE";
-    private static final String GITHUB_TOKEN = _TK_P1 + _TK_P2;
+    private static final String GITHUB_TOKEN = BuildConfig.GITHUB_TOKEN;
 
     // 行动类型
     public static final String ACTION_SPEED = "Speed";

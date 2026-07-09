@@ -3,9 +3,21 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Read secrets from secrets.properties (gitignored)
+def secretsProps = new Properties()
+def secretsFile = rootProject.file('secrets.properties')
+if (secretsFile.exists()) {
+    secretsProps.load(new FileInputStream(secretsFile))
+}
+
 android {
     namespace 'com.umaai.assistant'
     compileSdk 34
+
+    // AGP 8+ requires explicit opt-in for BuildConfig
+    buildFeatures {
+        buildConfig true
+    }
 
     defaultConfig {
         applicationId "com.umaai.assistant"
@@ -13,6 +25,9 @@ android {
         targetSdk 34
         versionCode 12400
         versionName "1.24"
+
+        // Inject GitHub token at build time — not in source code
+        buildConfigField "String", "GITHUB_TOKEN", "\"${secretsProps.getProperty('GITHUB_TOKEN', '')}\""
     }
 
     buildTypes {

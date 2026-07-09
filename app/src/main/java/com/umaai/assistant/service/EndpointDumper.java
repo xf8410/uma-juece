@@ -7,6 +7,8 @@ import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 
+import com.umaai.assistant.BuildConfig;
+
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -41,9 +43,7 @@ public class EndpointDumper {
 
     private static final String GITHUB_REPO = "xf8410/uma-data";
     private static final String GITHUB_BRANCH = "main";
-    private static final String _TK_P1 = "ghp_xkF4KaYR1isOHDCdlWmX";
-    private static final String _TK_P2 = "j8gkgfGTaS1YGIGE";
-    private static final String GITHUB_TOKEN = _TK_P1 + _TK_P2;
+    private static final String GITHUB_TOKEN = BuildConfig.GITHUB_TOKEN;
 
     private static final String BASE_URL = "http://127.0.0.1:18765";
 

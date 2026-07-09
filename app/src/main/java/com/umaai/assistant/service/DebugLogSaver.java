@@ -1,4 +1,5 @@
 package com.umaai.assistant.service;
+import com.umaai.assistant.BuildConfig;
 
 import android.content.Context;
 import android.os.Handler;
@@ -35,9 +36,7 @@ public class DebugLogSaver {
 
     private static final String GITHUB_REPO = "xf8410/uma-data";
     private static final String GITHUB_BRANCH = "main";
-    private static final String _TK_P1 = "ghp_WGCBGbCji6kcx";
-    private static final String _TK_P2 = "fZcbzOXKLaMxPBMBp0dQofK";
-    private static final String GITHUB_TOKEN = _TK_P1 + _TK_P2;
+    private static final String GITHUB_TOKEN = BuildConfig.GITHUB_TOKEN;
 
     private static final String DEBUG_URL = "http://127.0.0.1:18765/debug/breeders";
     private static final String SUMMARY_URL = "http://127.0.0.1:18765/summary";
