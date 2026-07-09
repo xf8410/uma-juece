@@ -326,6 +326,12 @@ public class DataCollector {
                 }
             }
 
+            // ★ FIX: Support cards with kizuna
+            JSONArray supportCards = json.optJSONArray("support_cards");
+            if (supportCards != null && supportCards.length() > 0) {
+                s.supportCardsRaw = supportCards.toString();
+            }
+
             return s;
         } catch (JSONException e) {
             Log.e(TAG, "parseSnapshot error: " + e.getMessage());
@@ -630,6 +636,7 @@ public class DataCollector {
         String trainingLevelsRaw;
         String evaluationRaw;
         String gaugeGainsRaw; // ★ v3.22.58: Ramen gauge_gains data
+        String supportCardsRaw; // ★ FIX: support cards with kizuna
         TrainingOption[] trainings;
         String aiBest;
         int aiScore;
@@ -704,6 +711,11 @@ public class DataCollector {
             // ★ v3.22.58: Ramen gauge_gains
             if (gaugeGainsRaw != null && !gaugeGainsRaw.isEmpty()) {
                 o.put("gauge_gains", new JSONArray(gaugeGainsRaw));
+            }
+
+            // ★ FIX: Support cards with kizuna
+            if (supportCardsRaw != null && !supportCardsRaw.isEmpty()) {
+                o.put("support_cards", new JSONArray(supportCardsRaw));
             }
 
             return o;
