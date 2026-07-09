@@ -236,6 +236,7 @@ public class DataCollector {
             s.skillPt = stats.optInt("skill_point", 0);
             s.vital = stats.optInt("vital", 50);
             s.maxVital = stats.optInt("max_vital", 100);
+            s.fan = stats.optInt("fan", 0);
             // ★ v3.22.27: SO发送motivation为字符串(Best/Good/Normal/Bad/Worst)，需映射为int
             String motStr = stats.optString("motivation", "Normal");
             switch (motStr) {
@@ -320,6 +321,9 @@ public class DataCollector {
             // ★ v3.22.58: Ramen gauge_gains
             JSONObject ramen = json.optJSONObject("ramen");
             if (ramen != null) {
+                // 存完整 ramen 对象
+                s.ramenRaw = ramen.toString();
+                // 兼容旧逻辑：单独提取 gauge_gains
                 JSONArray gaugeGains = ramen.optJSONArray("gauge_gains");
                 if (gaugeGains != null && gaugeGains.length() > 0) {
                     s.gaugeGainsRaw = gaugeGains.toString();
@@ -330,6 +334,12 @@ public class DataCollector {
             JSONArray supportCards = json.optJSONArray("support_cards");
             if (supportCards != null && supportCards.length() > 0) {
                 s.supportCardsRaw = supportCards.toString();
+            }
+
+            // ★ FIX: Learned skills list
+            JSONObject skills = json.optJSONObject("skills");
+            if (skills != null) {
+                s.skillsRaw = skills.toString();
             }
 
             return s;
@@ -627,9 +637,11 @@ public class DataCollector {
     private static class TurnSnapshot {
         int month, half, turn;
         String scenario;
+        int charaId; // ★ 顶层 chara_id
         int speed, stamina, power, guts, wisdom, skillPt;
         int vital, maxVital;
         int motivation; // 1-5
+        int fan; // ★ 粉丝数
         boolean hasBadCondition;
         String charaEffectIds;
         String buffsRaw;
@@ -637,6 +649,8 @@ public class DataCollector {
         String evaluationRaw;
         String gaugeGainsRaw; // ★ v3.22.58: Ramen gauge_gains data
         String supportCardsRaw; // ★ FIX: support cards with kizuna
+        String skillsRaw; // ★ FIX: learned skills list
+        String ramenRaw; // ★ FIX: full ramen object (checkpoint_pt, feeling_info, etc)
         TrainingOption[] trainings;
         String aiBest;
         int aiScore;
@@ -646,7 +660,6 @@ public class DataCollector {
         // 检测结果
         String actionTaken = "Unknown";
         // ★ v1.24: chara_id from plugin (career vs scenario event distinction)
-        int charaId = 0;
         int storyId = 0;
 
         JSONObject toJson() throws JSONException {
@@ -654,6 +667,8 @@ public class DataCollector {
             o.put("turn", turn);
             o.put("month", month);
             o.put("half", half);
+            if (charaId > 0) o.put("chara_id", charaId);
+            if (storyId > 0) o.put("story_id", storyId);
 
             // 状态向量
             JSONObject stats = new JSONObject();
@@ -666,6 +681,7 @@ public class DataCollector {
             stats.put("vital", vital);
             stats.put("max_vital", maxVital);
             stats.put("motivation", motivation);
+            stats.put("fan", fan);
             stats.put("has_bad_condition", hasBadCondition);
             o.put("stats", stats);
 
@@ -716,6 +732,36 @@ public class DataCollector {
             // ★ FIX: Support cards with kizuna
             if (supportCardsRaw != null && !supportCardsRaw.isEmpty()) {
                 o.put("support_cards", new JSONArray(supportCardsRaw));
+            }
+
+            // ★ FIX: Learned skills
+            if (skillsRaw != null && !skillsRaw.isEmpty()) {
+                o.put("skills", new JSONObject(skillsRaw));
+            }
+
+            // ★ FIX: Full ramen state
+            if (ramenRaw != null && !ramenRaw.isEmpty()) {
+                o.put("ramen", new JSONObject(ramenRaw));
+            }
+
+            // ★ FIX: Training levels
+            if (trainingLevelsRaw != null && !trainingLevelsRaw.isEmpty()) {
+                o.put("training_levels", new JSONArray(trainingLevelsRaw));
+            }
+
+            // ★ FIX: Buffs
+            if (buffsRaw != null && !buffsRaw.isEmpty()) {
+                o.put("buffs", new JSONArray(buffsRaw));
+            }
+
+            // ★ FIX: Chara effect IDs
+            if (charaEffectIds != null && !charaEffectIds.isEmpty()) {
+                o.put("chara_effect_ids", new JSONArray(charaEffectIds));
+            }
+
+            // ★ FIX: Evaluation
+            if (evaluationRaw != null && !evaluationRaw.isEmpty()) {
+                o.put("evaluation", new JSONArray(evaluationRaw));
             }
 
             return o;
