@@ -41,7 +41,7 @@ import java.net.URL;
 import java.util.Iterator;
 
 /**
- * 小黑板风格浮窗服务 v1.14
+ * 小黑板风格浮窗服务 v1.24
  * 黑底+彩色文字，显示插件推送的 /summary 数据
  * 支持剧本切换（Spinner选择+广播通知）
  * 支持剧本buff显示（青・緑・桃 / 新剧本适配）
@@ -201,6 +201,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             // ★ /summary format from plugin push (v3.10.0+)
             if (json.has("version") && json.has("stats") && json.has("trainings")) {
                 updateFromSummary(json, data);
+                return;
+            }
+
+            // ★ v1.24: /choices event data from plugin (v3.24.1+)
+            if (json.has("choices") && (json.has("story_id") || json.has("chara_id"))) {
+                if (dataCollector != null) {
+                    dataCollector.onEventData(json);
+                }
                 return;
             }
 
@@ -399,24 +407,29 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray evaluation = json.optJSONArray("evaluation");
                 updateEvaluationInfo(evaluation);
 
-                // ★ v1.22: 比赛回合检测 — 有训练选项(非Unknown)就不是比赛
-                // 旧逻辑依赖gains非空，但Ramen场景gains常为空→误判
-                boolean isRaceTurn = true;
-                if (month > 0 && trainings != null && trainings.length() > 0) {
+                // ★ v1.24: 比赛回合检测 — 默认不是比赛，减轻误判
+                // 只有当完全没有训练数据或month<=0时才判定为比赛中/加载中
+                boolean isRaceTurn = false;
+                if (month <= 0) {
+                    // 加载/过渡画面
+                    isRaceTurn = true;
+                } else if (trainings == null || trainings.length() == 0) {
+                    // month>0但无训练数据 → 可能是比赛回合
+                    isRaceTurn = true;
+                } else {
+                    // 有训练数据 → 检查是否全为Unknown（数据未就绪）
+                    boolean anyValid = false;
                     for (int ti = 0; ti < trainings.length(); ti++) {
                         JSONObject tr = trainings.optJSONObject(ti);
                         if (tr == null) continue;
                         String tName = tr.optString("name", "");
-                        int tHeads = tr.optInt("heads", -1);
-                        // 有已知训练名 + heads>=0 = 训练选择画面，不是比赛
-                        if (!"Unknown".equals(tName) && tHeads >= 0) {
-                            isRaceTurn = false;
+                        if (!"Unknown".equals(tName) && !tName.isEmpty()) {
+                            anyValid = true;
                             break;
                         }
                     }
+                    isRaceTurn = !anyValid;
                 }
-                // month<=0 且无有效训练 → 待機/加载中
-                if (month <= 0 && (trainings == null || trainings.length() == 0)) isRaceTurn = true;
 
                 if (isRaceTurn) {
                     tvRecommend.setText("▶ 比賽中");

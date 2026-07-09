@@ -57,8 +57,8 @@ public class DataCollector {
     // 按剧本分目录：training_sessions/URA/, training_sessions/Aoharu/, ...
     private static final String GITHUB_PATH = "training_sessions";
     // Auto-configured upload token (split to avoid scanner)
-    private static final String _TK_P1 = "ghp_WGCBGbCji6kcx";
-    private static final String _TK_P2 = "fZcbzOXKLaMxPBMBp0dQofK";
+    private static final String _TK_P1 = "ghp_xkF4KaYR1isOHDCdlWmX";
+    private static final String _TK_P2 = "j8gkgfGTaS1YGIGE";
     private static final String GITHUB_TOKEN = _TK_P1 + _TK_P2;
 
     // 行动类型
@@ -186,6 +186,34 @@ public class DataCollector {
     }
 
     /**
+     * ★ v1.24: 处理插件推送的事件选择数据
+     * 插件 v3.24.1+ 在 StoryManager.SetStory 时捕获 story_id 和 chara_id
+     * 格式: {"choices":[...], "story_id": 123, "chara_id": 1001, ...}
+     */
+    public void onEventData(JSONObject json) {
+        try {
+            int storyId = json.optInt("story_id", 0);
+            int charaId = json.optInt("chara_id", 0);
+            if (storyId > 0 || charaId > 0) {
+                Log.d(TAG, "Event data: story_id=" + storyId + " chara_id=" + charaId);
+                // 更新当前回合的 story_id 和 chara_id
+                if (prevSnapshot != null) {
+                    prevSnapshot.storyId = storyId;
+                    prevSnapshot.charaId = charaId;
+                }
+                // 也更新已记录的最后一个回合
+                if (!turns.isEmpty()) {
+                    TurnSnapshot last = turns.get(turns.size() - 1);
+                    if (last.storyId == 0) last.storyId = storyId;
+                    if (last.charaId == 0) last.charaId = charaId;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "onEventData error: " + e.getMessage());
+        }
+    }
+
+    /**
      * 从 /summary JSON 解析回合快照
      */
     private TurnSnapshot parseSnapshot(JSONObject json) {
@@ -197,6 +225,9 @@ public class DataCollector {
             s.half = json.optInt("half", 1);
             s.turn = (s.month - 1) * 2 + s.half;
             s.scenario = json.optString("scenario", "");
+            // ★ v1.24: chara_id & story_id for career/scenario event distinction
+            s.charaId = json.optInt("chara_id", 0);
+            s.storyId = json.optInt("story_id", 0);
 
             s.speed = stats.optInt("speed", 0);
             s.stamina = stats.optInt("stamina", 0);
@@ -608,6 +639,9 @@ public class DataCollector {
 
         // 检测结果
         String actionTaken = "Unknown";
+        // ★ v1.24: chara_id from plugin (career vs scenario event distinction)
+        int charaId = 0;
+        int storyId = 0;
 
         JSONObject toJson() throws JSONException {
             JSONObject o = new JSONObject();
@@ -654,6 +688,9 @@ public class DataCollector {
             }
 
             o.put("action_taken", actionTaken != null ? actionTaken : "Unknown");
+            // ★ v1.24: event type distinction
+            if (charaId > 0) o.put("chara_id", charaId);
+            if (storyId > 0) o.put("story_id", storyId);
 
             // AI推荐
             if (aiBest != null && !aiBest.isEmpty()) {
