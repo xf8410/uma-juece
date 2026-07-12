@@ -387,6 +387,17 @@
             android:paddingEnd="2dp"
             android:clickable="true"
             android:focusable="true" />
+        <TextView
+            android:id="@+id/btn_evt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#00FFAA"
+            android:textSize="8sp"
+            android:text="EVT"
+            android:paddingStart="6dp"
+            android:paddingEnd="2dp"
+            android:clickable="true"
+            android:focusable="true" />
     </LinearLayout>
 
     <!-- 胜鞍分析面板（默认隐藏，点「鞍」按钮展开） -->
@@ -438,6 +449,31 @@
             android:fontFamily="monospace"
             android:lineSpacingExtra="0dp"
             android:text="点PKT开始抓包" />
+    </LinearLayout>
+
+    <!-- 事件推荐面板（默认隐藏，点「EVT」按钮展开） -->
+    <LinearLayout
+        android:id="@+id/evt_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:paddingTop="2dp">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#004433"
+            android:layout_marginBottom="2dp" />
+
+        <TextView
+            android:id="@+id/tv_evt_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#00FFAA"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:text="监控中..." />
     </LinearLayout>
 
 </LinearLayout>

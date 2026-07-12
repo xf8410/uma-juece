@@ -123,6 +123,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private boolean sniffEnabled = false;
     private Thread sniffThread;
     private volatile boolean sniffRunning = false;
+    // 事件推荐面板
+    private View evtPanel;
+    private TextView tvEvtContent;
+    private boolean evtPanelVisible = false;
+    private Thread evtThread;
+    private volatile boolean evtRunning = false;
+    private int lastEvtChoiceCount = 0;
+    private int lastEvtStoryId = 0;
 
     // HTTP服务
     private HttpDataService httpServer;
@@ -1561,6 +1569,194 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
+    // ======== 事件推荐 ========
+
+    private void startEvtPolling() {
+        evtRunning = true;
+        evtThread = new Thread(() -> {
+            // 先清一下旧数据
+            httpGet("http://127.0.0.1:18765/api/event/clear");
+            lastEvtChoiceCount = 0;
+            lastEvtStoryId = 0;
+
+            while (evtRunning && evtPanelVisible) {
+                try {
+                    String data = httpGet("http://127.0.0.1:18765/api/event/choices");
+                    if (data != null && !data.isEmpty()) {
+                        processEvtData(data);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "evt poll error: " + e.getMessage());
+                }
+                try { Thread.sleep(500); } catch (InterruptedException e) { break; }
+            }
+        });
+        evtThread.setDaemon(true);
+        evtThread.setName("EvtPoll");
+        evtThread.start();
+    }
+
+    private void stopEvtPolling() {
+        evtRunning = false;
+        if (evtThread != null) evtThread.interrupt();
+    }
+
+    private void processEvtData(String jsonStr) {
+        try {
+            JSONObject json = new JSONObject(jsonStr);
+            int storyId = json.optInt("story_id", 0);
+            int selectedIdx = json.optInt("selected_idx", -1);
+            JSONArray choices = json.optJSONArray("choices");
+            int choiceCount = (choices != null) ? choices.length() : 0;
+
+            // 没有选项 → 无事件
+            if (choiceCount == 0) {
+                if (lastEvtChoiceCount > 0) {
+                    // 事件刚结束，清空
+                    lastEvtChoiceCount = 0;
+                    lastEvtStoryId = 0;
+                    handler.post(() -> {
+                        if (tvEvtContent != null) {
+                            tvEvtContent.setText("监控中...");
+                            tvEvtContent.setTextColor(0xFF00FFAA);
+                        }
+                    });
+                }
+                return;
+            }
+
+            // 玩家已选择 → 显示已选
+            if (selectedIdx >= 0 && selectedIdx < choiceCount) {
+                final int sel = selectedIdx;
+                final int total = choiceCount;
+                handler.post(() -> {
+                    if (tvEvtContent != null) {
+                        tvEvtContent.setText("已选: 第" + (sel + 1) + "个 / " + total + "选");
+                        tvEvtContent.setTextColor(0xFF888888);
+                    }
+                });
+                // 3秒后自动清空
+                try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
+                httpGet("http://127.0.0.1:18765/api/event/clear");
+                lastEvtChoiceCount = 0;
+                lastEvtStoryId = 0;
+                handler.post(() -> {
+                    if (tvEvtContent != null) {
+                        tvEvtContent.setText("监控中...");
+                        tvEvtContent.setTextColor(0xFF00FFAA);
+                    }
+                });
+                return;
+            }
+
+            // 新事件或选项数变化 → 重新评分
+            if (choiceCount != lastEvtChoiceCount || storyId != lastEvtStoryId) {
+                lastEvtChoiceCount = choiceCount;
+                lastEvtStoryId = storyId;
+
+                // 先显示"检测到事件"
+                final int cnt = choiceCount;
+                handler.post(() -> {
+                    if (tvEvtContent != null) {
+                        tvEvtContent.setText("检测到事件 " + cnt + "选 评分中...");
+                        tvEvtContent.setTextColor(0xFFFFFFAA);
+                    }
+                });
+
+                // 收集 gain_ids
+                StringBuilder gainIds = new StringBuilder();
+                for (int i = 0; i < choiceCount; i++) {
+                    JSONObject c = choices.optJSONObject(i);
+                    if (c == null) continue;
+                    int gid = c.optInt("gain_id", 0);
+                    if (gid > 0) {
+                        if (gainIds.length() > 0) gainIds.append(",");
+                        gainIds.append(gid);
+                    }
+                }
+
+                // 查 MDB 获取各选项的 reward 数值
+                int bestIdx = -1;
+                double bestScore = Double.NEGATIVE_INFINITY;
+                String bestDetail = "";
+
+                if (gainIds.length() > 0) {
+                    // 查 event_choice_reward_gain_param 获取实际数值
+                    String sql = "SELECT display_id, effect_value0, effect_value1, effect_value2" +
+                            " FROM event_choice_reward_gain_param" +
+                            " WHERE display_id IN (" + gainIds + ")";
+                    String mdbResult = httpGet("http://127.0.0.1:18765/mdb/raw?sql=" +
+                            java.net.URLEncoder.encode(sql, "UTF-8"));
+
+                    if (mdbResult != null && !mdbResult.isEmpty()) {
+                        try {
+                            JSONObject mdb = new JSONObject(mdbResult);
+                            JSONArray rows = mdb.optJSONArray("rows");
+                            // 建 display_id → total_value 映射
+                            java.util.Map<Integer, Integer> gainMap = new java.util.HashMap<>();
+                            java.util.Map<Integer, String> gainDetail = new java.util.HashMap<>();
+                            if (rows != null) {
+                                for (int r = 0; r < rows.length(); r++) {
+                                    JSONArray row = rows.optJSONArray(r);
+                                    if (row == null || row.length() < 4) continue;
+                                    int displayId = row.optInt(0);
+                                    int v0 = row.optInt(1);
+                                    int v1 = row.optInt(2);
+                                    int v2 = row.optInt(3);
+                                    int total = v0 + v1 + v2;
+                                    gainMap.put(displayId, total);
+                                    StringBuilder detail = new StringBuilder();
+                                    if (v0 != 0) detail.append(v0 > 0 ? "+" : "").append(v0).append(" ");
+                                    if (v1 != 0) detail.append(v1 > 0 ? "+" : "").append(v1).append(" ");
+                                    if (v2 != 0) detail.append(v2 > 0 ? "+" : "").append(v2);
+                                    gainDetail.put(displayId, detail.toString().trim());
+                                }
+                            }
+
+                            // 评分每个选项
+                            for (int i = 0; i < choiceCount; i++) {
+                                JSONObject c = choices.optJSONObject(i);
+                                if (c == null) continue;
+                                int gid = c.optInt("gain_id", 0);
+                                Integer total = gainMap.get(gid);
+                                if (total != null) {
+                                    double score = total;
+                                    if (score > bestScore) {
+                                        bestScore = score;
+                                        bestIdx = i;
+                                        bestDetail = gainDetail.getOrDefault(gid, "");
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "MDB parse error: " + e.getMessage());
+                        }
+                    }
+                }
+
+                // 显示推荐结果
+                final int recommend = bestIdx;
+                final double score = bestScore;
+                final String detail = bestDetail;
+                final int total = choiceCount;
+                handler.post(() -> {
+                    if (tvEvtContent != null && evtPanelVisible) {
+                        if (recommend >= 0) {
+                            tvEvtContent.setText("推荐选第" + (recommend + 1) + "个 (" + total + "选)");
+                            tvEvtContent.setTextColor(0xFF00FFAA);
+                        } else {
+                            // MDB 查不到 → 用简单启发式
+                            tvEvtContent.setText("事件 " + total + "选 (数据不足)");
+                            tvEvtContent.setTextColor(0xFFAAAAAA);
+                        }
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "evt process error: " + e.getMessage());
+        }
+    }
+
     // ======== 通知栏 ========
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1660,6 +1856,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             // 抓包面板
             sniffPanel = floatingView.findViewById(R.id.sniff_panel);
             tvSniffContent = floatingView.findViewById(R.id.tv_sniff_content);
+            // 事件推荐面板
+            evtPanel = floatingView.findViewById(R.id.evt_panel);
+            tvEvtContent = floatingView.findViewById(R.id.tv_evt_content);
 
             // ★ 初始化剧本标签
             updateScenarioLabel();
@@ -1774,6 +1973,22 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 });
             }
 
+            // ★ 事件推荐按钮
+            TextView btnEvt = floatingView.findViewById(R.id.btn_evt);
+            if (btnEvt != null) {
+                btnEvt.setOnClickListener(v -> {
+                    evtPanelVisible = !evtPanelVisible;
+                    if (evtPanelVisible) {
+                        evtPanel.setVisibility(View.VISIBLE);
+                        tvEvtContent.setText("监控中...");
+                        startEvtPolling();
+                    } else {
+                        evtPanel.setVisibility(View.GONE);
+                        stopEvtPolling();
+                    }
+                });
+            }
+
         } catch (Exception e) {
             Log.e(TAG, "createFloatingView failed: " + e.getMessage(), e);
             handler.postDelayed(() -> {
@@ -1877,6 +2092,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         super.onDestroy();
         stopFallbackPoll();
         stopSniffPolling();
+        stopEvtPolling();
         if (sniffEnabled) {
             toggleSniff(false);
         }
