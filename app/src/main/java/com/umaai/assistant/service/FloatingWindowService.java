@@ -116,6 +116,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private View saddlePanel;
     private TextView tvSaddleContent;
     private boolean saddlePanelVisible = false;
+    // 抓包面板
+    private View sniffPanel;
+    private TextView tvSniffContent;
+    private boolean sniffPanelVisible = false;
+    private boolean sniffEnabled = false;
+    private Thread sniffThread;
+    private volatile boolean sniffRunning = false;
 
     // HTTP服务
     private HttpDataService httpServer;
@@ -1370,6 +1377,190 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         return sb.toString().trim();
     }
 
+    // ======== 抓包 (EventLogger) ========
+
+    private void toggleSniff(boolean enable) {
+        sniffEnabled = enable;
+        new Thread(() -> {
+            String url = "http://127.0.0.1:18765/api/sniff/toggle";
+            // POST with empty body — hlpatch just needs the path hit
+            try {
+                java.net.URL u = new java.net.URL(url);
+                HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(3000);
+                conn.setReadTimeout(3000);
+                conn.getOutputStream().write(enable ? b("1") : b("0"));
+                String resp = readAll(conn.getInputStream());
+                conn.disconnect();
+                Log.d(TAG, "sniff toggle: " + resp);
+            } catch (Exception e) {
+                Log.e(TAG, "sniff toggle failed: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private byte[] b(String s) { return s.getBytes(java.nio.charset.StandardCharsets.UTF_8); }
+
+    private String readAll(java.io.InputStream is) throws Exception {
+        java.io.BufferedReader r = new java.io.BufferedReader(
+                new java.io.InputStreamReader(is, "UTF-8"));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = r.readLine()) != null) sb.append(line);
+        return sb.toString();
+    }
+
+    private void startSniffPolling() {
+        sniffRunning = true;
+        sniffThread = new Thread(() -> {
+            // 等一下让 toggle 生效
+            try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+            while (sniffRunning && sniffPanelVisible) {
+                try {
+                    String data = httpGet("http://127.0.0.1:18765/api/sniff");
+                    if (data != null && !data.isEmpty()) {
+                        final String display = renderSniffData(data);
+                        handler.post(() -> {
+                            if (tvSniffContent != null && sniffPanelVisible) {
+                                tvSniffContent.setText(display);
+                            }
+                        });
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "sniff poll error: " + e.getMessage());
+                }
+                try { Thread.sleep(1500); } catch (InterruptedException e) { break; }
+            }
+        });
+        sniffThread.setDaemon(true);
+        sniffThread.setName("SniffPoll");
+        sniffThread.start();
+    }
+
+    private void stopSniffPolling() {
+        sniffRunning = false;
+        if (sniffThread != null) sniffThread.interrupt();
+    }
+
+    private String renderSniffData(String jsonStr) {
+        try {
+            JSONObject json = new JSONObject(jsonStr);
+            boolean enabled = json.optBoolean("enabled", false);
+            if (!enabled) return "抓包未启用";
+
+            JSONArray reqs = json.optJSONArray("requests");
+            JSONArray resps = json.optJSONArray("responses");
+
+            StringBuilder sb = new StringBuilder();
+            int reqCount = (reqs != null) ? reqs.length() : 0;
+            int respCount = (resps != null) ? resps.length() : 0;
+            sb.append("PKT ").append(reqCount).append("req/").append(respCount)
+              .append("resp\n");
+
+            // 显示最近的请求（最多5条）
+            if (reqs != null && reqCount > 0) {
+                int start = Math.max(0, reqCount - 5);
+                for (int i = reqCount - 1; i >= start; i--) {
+                    JSONObject req = reqs.optJSONObject(i);
+                    if (req == null) continue;
+                    String url = req.optString("url", "?");
+                    // 提取 API 路径
+                    String apiName = extractApiName(url);
+                    int size = req.optInt("size", 0);
+                    String hex = req.optString("hex", "");
+                    String text = req.optString("text", "");
+
+                    sb.append("→").append(apiName).append(" [").append(size).append("B]\n");
+
+                    // 尝试 MessagePack 解码
+                    String decoded = tryDecodeMsgPack(hex);
+                    if (decoded != null) {
+                        // 截断过长的解码结果
+                        if (decoded.length() > 200) {
+                            decoded = decoded.substring(0, 200) + "...";
+                        }
+                        sb.append(decoded).append("\n");
+                    } else if (text != null && !text.isEmpty() && text.length() < 200) {
+                        sb.append("  txt:").append(text.substring(0, Math.min(text.length(), 100)));
+                        sb.append("\n");
+                    }
+                }
+            }
+
+            // 显示最近的响应（最多3条）
+            if (resps != null && respCount > 0) {
+                int start = Math.max(0, respCount - 3);
+                for (int i = respCount - 1; i >= start; i--) {
+                    JSONObject resp = resps.optJSONObject(i);
+                    if (resp == null) continue;
+                    int id = resp.optInt("id", 0);
+                    int size = resp.optInt("size", 0);
+                    String hex = resp.optString("hex", "");
+
+                    sb.append("←#").append(id).append(" [").append(size).append("B]\n");
+
+                    String decoded = tryDecodeMsgPack(hex);
+                    if (decoded != null) {
+                        if (decoded.length() > 200) {
+                            decoded = decoded.substring(0, 200) + "...";
+                        }
+                        sb.append(decoded).append("\n");
+                    }
+                }
+            }
+
+            if (reqCount == 0 && respCount == 0) {
+                sb.append("等待通信...");
+            }
+
+            return sb.toString().trim();
+        } catch (Exception e) {
+            return "解析错误: " + e.getMessage();
+        }
+    }
+
+    private String extractApiName(String url) {
+        if (url == null || url.isEmpty()) return "?";
+        // 提取最后一段路径
+        int idx = url.lastIndexOf('/');
+        if (idx >= 0 && idx < url.length() - 1) {
+            String name = url.substring(idx + 1);
+            // 去掉 query string
+            int qIdx = name.indexOf('?');
+            if (qIdx >= 0) name = name.substring(0, qIdx);
+            return name;
+        }
+        return url.length() > 30 ? url.substring(url.length() - 30) : url;
+    }
+
+    private String tryDecodeMsgPack(String hex) {
+        if (hex == null || hex.isEmpty()) return null;
+        try {
+            // hex → bytes
+            int len = hex.length() / 2;
+            if (len < 2) return null;
+            byte[] bytes = new byte[len];
+            for (int i = 0; i < len; i++) {
+                bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+            }
+            // 如果是 JSON 文本（以 { 开头），直接返回
+            if (bytes[0] == '{' || bytes[0] == '[') {
+                return new String(bytes, 0, Math.min(bytes.length, 200),
+                        java.nio.charset.StandardCharsets.UTF_8);
+            }
+            // MessagePack 解码
+            Object decoded = MsgPackDecoder.decode(bytes);
+            if (decoded == null) return null;
+            String formatted = MsgPackDecoder.formatValue(decoded, 0);
+            if (formatted.length() < 2) return null;
+            return "  " + formatted;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // ======== 通知栏 ========
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1466,6 +1657,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             // 胜鞍面板
             saddlePanel = floatingView.findViewById(R.id.saddle_panel);
             tvSaddleContent = floatingView.findViewById(R.id.tv_saddle_content);
+            // 抓包面板
+            sniffPanel = floatingView.findViewById(R.id.sniff_panel);
+            tvSniffContent = floatingView.findViewById(R.id.tv_sniff_content);
 
             // ★ 初始化剧本标签
             updateScenarioLabel();
@@ -1558,6 +1752,24 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         fetchSaddleAnalysis();
                     } else {
                         saddlePanel.setVisibility(View.GONE);
+                    }
+                });
+            }
+
+            // ★ 抓包按钮
+            TextView btnSniff = floatingView.findViewById(R.id.btn_sniff);
+            if (btnSniff != null) {
+                btnSniff.setOnClickListener(v -> {
+                    sniffPanelVisible = !sniffPanelVisible;
+                    if (sniffPanelVisible) {
+                        sniffPanel.setVisibility(View.VISIBLE);
+                        if (!sniffEnabled) {
+                            toggleSniff(true);
+                        }
+                        startSniffPolling();
+                    } else {
+                        sniffPanel.setVisibility(View.GONE);
+                        stopSniffPolling();
                     }
                 });
             }
@@ -1664,6 +1876,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     public void onDestroy() {
         super.onDestroy();
         stopFallbackPoll();
+        stopSniffPolling();
+        if (sniffEnabled) {
+            toggleSniff(false);
+        }
         stopHttpServer();
         if (floatingView != null && isViewAdded) {
             try {
