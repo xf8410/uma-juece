@@ -112,6 +112,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvFacility, tvHookStatus;
     // 剧本标签
     private TextView tvScenarioLabel;
+    // 胜鞍面板
+    private View saddlePanel;
+    private TextView tvSaddleContent;
+    private boolean saddlePanelVisible = false;
 
     // HTTP服务
     private HttpDataService httpServer;
@@ -1220,6 +1224,152 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
+    // ======== 胜鞍分析 ========
+    private void fetchSaddleAnalysis() {
+        new Thread(() -> {
+            String data = httpGet("http://127.0.0.1:18765/saddle-analysis");
+            if (data == null || data.isEmpty()) {
+                handler.post(() -> {
+                    if (tvSaddleContent != null) {
+                        tvSaddleContent.setText("无法连接插件");
+                        tvSaddleContent.setTextColor(0xFFFF6666);
+                    }
+                });
+                return;
+            }
+            try {
+                JSONObject json = new JSONObject(data);
+                if (json.has("error")) {
+                    handler.post(() -> {
+                        if (tvSaddleContent != null) {
+                            tvSaddleContent.setText("未在育成中");
+                            tvSaddleContent.setTextColor(0xFF888888);
+                        }
+                    });
+                    return;
+                }
+                final String display = renderSaddleAnalysis(json);
+                handler.post(() -> {
+                    if (tvSaddleContent != null) {
+                        tvSaddleContent.setText(display);
+                        tvSaddleContent.setTextColor(0xFFCCAAFF);
+                    }
+                });
+            } catch (Exception e) {
+                handler.post(() -> {
+                    if (tvSaddleContent != null) {
+                        tvSaddleContent.setText("解析失败: " + e.getMessage());
+                        tvSaddleContent.setTextColor(0xFFFF6666);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private String renderSaddleAnalysis(JSONObject json) throws JSONException {
+        StringBuilder sb = new StringBuilder();
+        int totalRaces = json.optInt("total_races", 0);
+        int winCount = json.optInt("win_count", 0);
+        int saddleCount = json.optInt("saddle_count", 0);
+
+        sb.append("出走").append(totalRaces).append(" 勝").append(winCount)
+          .append(" G1勝鞍").append(saddleCount).append("\n");
+
+        // 当前马胜鞍
+        JSONArray winSaddles = json.optJSONArray("win_saddles");
+        if (winSaddles != null && winSaddles.length() > 0) {
+            int relationBonusCount = 0;
+            int totalPoints = 0;
+            StringBuilder saddleStr = new StringBuilder();
+            for (int i = 0; i < winSaddles.length(); i++) {
+                JSONObject s = winSaddles.optJSONObject(i);
+                if (s == null) continue;
+                String name = s.optString("name", "?");
+                boolean isRelBonus = s.optBoolean("is_relation_bonus", false);
+                int point = s.optInt("relation_point", 0);
+                if (isRelBonus) {
+                    relationBonusCount++;
+                    totalPoints += point;
+                    if (saddleStr.length() > 0) saddleStr.append(" ");
+                    saddleStr.append(name).append("(").append(point).append(")");
+                }
+            }
+            sb.append("相性ボーナス: ").append(relationBonusCount).append("種 ")
+              .append(totalPoints).append("pt\n");
+            if (saddleStr.length() > 0) {
+                sb.append(saddleStr).append("\n");
+            }
+        } else {
+            sb.append("G1勝鞍なし\n");
+        }
+
+        // 亲马胜鞍
+        JSONArray parentSaddles = json.optJSONArray("parent_saddles");
+        if (parentSaddles != null && parentSaddles.length() > 0) {
+            // 收集当前马胜鞍名集合
+            java.util.Set<String> mySaddleNames = new java.util.HashSet<>();
+            if (winSaddles != null) {
+                for (int i = 0; i < winSaddles.length(); i++) {
+                    JSONObject s = winSaddles.optJSONObject(i);
+                    if (s != null) mySaddleNames.add(s.optString("name", ""));
+                }
+            }
+            for (int p = 0; p < parentSaddles.length(); p++) {
+                JSONObject parent = parentSaddles.optJSONObject(p);
+                if (parent == null) continue;
+                String label = parent.optString("label", "p" + p);
+                int charaId = parent.optInt("chara_id", 0);
+                int pCount = parent.optInt("saddle_count", 0);
+                JSONArray pSaddles = parent.optJSONArray("saddles");
+                sb.append(label).append("(").append(charaId).append("): ");
+                if (pCount == 0 || pSaddles == null || pSaddles.length() == 0) {
+                    sb.append("なし\n");
+                    continue;
+                }
+                int overlap = 0;
+                StringBuilder pStr = new StringBuilder();
+                for (int i = 0; i < pSaddles.length(); i++) {
+                    JSONObject ps = pSaddles.optJSONObject(i);
+                    if (ps == null) continue;
+                    String name = ps.optString("name", "?");
+                    if (mySaddleNames.contains(name)) {
+                        overlap++;
+                        if (pStr.length() > 0) pStr.append(" ");
+                        pStr.append("★").append(name);
+                    }
+                }
+                sb.append(pCount).append("種");
+                if (overlap > 0) {
+                    sb.append(" 一致").append(overlap).append("種\n");
+                    sb.append(pStr).append("\n");
+                } else {
+                    sb.append("\n");
+                }
+            }
+        }
+
+        // MDB relation_groups 点数表（只显示有点的）
+        JSONArray relGroups = json.optJSONArray("relation_groups");
+        if (relGroups != null && relGroups.length() > 0) {
+            StringBuilder rgStr = new StringBuilder();
+            for (int i = 0; i < relGroups.length(); i++) {
+                JSONObject rg = relGroups.optJSONObject(i);
+                if (rg == null) continue;
+                int point = rg.optInt("point", 0);
+                if (point > 0) {
+                    int type = rg.optInt("type", 0);
+                    if (rgStr.length() > 0) rgStr.append(",");
+                    rgStr.append(type).append(":").append(point);
+                }
+            }
+            if (rgStr.length() > 0) {
+                sb.append("MDB相性テーブル: ").append(rgStr);
+            }
+        }
+
+        return sb.toString().trim();
+    }
+
     // ======== 通知栏 ========
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1313,6 +1463,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvTeamMembers = floatingView.findViewById(R.id.tv_team_members);
             tvTeamRank = floatingView.findViewById(R.id.tv_team_rank);
             tvDreamTraining = floatingView.findViewById(R.id.tv_dream_training);
+            // 胜鞍面板
+            saddlePanel = floatingView.findViewById(R.id.saddle_panel);
+            tvSaddleContent = floatingView.findViewById(R.id.tv_saddle_content);
 
             // ★ 初始化剧本标签
             updateScenarioLabel();
@@ -1391,6 +1544,21 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 btnClose.setOnClickListener(v -> {
                     Log.d(TAG, "Close button clicked");
                     stopSelf();
+                });
+            }
+
+            // ★ 胜鞍分析按钮
+            TextView btnSaddle = floatingView.findViewById(R.id.btn_saddle);
+            if (btnSaddle != null) {
+                btnSaddle.setOnClickListener(v -> {
+                    saddlePanelVisible = !saddlePanelVisible;
+                    if (saddlePanelVisible) {
+                        saddlePanel.setVisibility(View.VISIBLE);
+                        tvSaddleContent.setText("加载中...");
+                        fetchSaddleAnalysis();
+                    } else {
+                        saddlePanel.setVisibility(View.GONE);
+                    }
                 });
             }
 

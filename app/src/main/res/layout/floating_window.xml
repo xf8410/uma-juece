@@ -365,6 +365,42 @@
             android:paddingEnd="4dp"
             android:clickable="true"
             android:focusable="true" />
+        <TextView
+            android:id="@+id/btn_saddle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#BB88FF"
+            android:textSize="8sp"
+            android:text="鞍"
+            android:paddingStart="6dp"
+            android:paddingEnd="2dp"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <!-- 胜鞍分析面板（默认隐藏，点「鞍」按钮展开） -->
+    <LinearLayout
+        android:id="@+id/saddle_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:paddingTop="2dp">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#442266"
+            android:layout_marginBottom="2dp" />
+
+        <TextView
+            android:id="@+id/tv_saddle_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#CCAAFF"
+            android:textSize="8sp"
+            android:lineSpacingExtra="1dp"
+            android:text="加载中..." />
     </LinearLayout>
 
 </LinearLayout>
