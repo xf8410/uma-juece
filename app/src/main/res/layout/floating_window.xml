@@ -96,6 +96,28 @@
         android:paddingBottom="1dp"
         android:text="等待数据..." />
 
+    <!-- 比赛/目标状态栏 -->
+    <TextView
+        android:id="@+id/tv_race_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#888888"
+        android:textSize="8sp"
+        android:paddingBottom="1dp"
+        android:text=""
+        android:visibility="gone" />
+
+    <!-- 拉面杯 Gauge 状态栏 -->
+    <TextView
+        android:id="@+id/tv_ramen_gauge"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FFAA44"
+        android:textSize="8sp"
+        android:paddingBottom="1dp"
+        android:text=""
+        android:visibility="gone" />
+
     <!-- AI评估详情 -->
     <TextView
         android:id="@+id/tv_ai_detail"

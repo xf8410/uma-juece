@@ -112,6 +112,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvFacility, tvHookStatus;
     // 剧本标签
     private TextView tvScenarioLabel;
+    // 比赛/目标状态栏
+    private TextView tvRaceStatus;
+    // 拉面杯 Gauge 状态栏
+    private TextView tvRamenGauge;
+    // turn_config 缓存（从 /log/turn 拉取一次）
+    private JSONArray turnConfigCache = null;
+    private long turnConfigCacheTime = 0;
     // 胜鞍面板
     private View saddlePanel;
     private TextView tvSaddleContent;
@@ -480,9 +487,15 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // ★ Buff显示 - 根据剧本分支
                 updateBuffs(buffs);
 
-                // ★ Ramen剧本详细信息（CheckpointPt/隠し味/Recommend/Region）
+                // ★ 比赛回合检测（改进版）+ 生涯目标粉丝数
+                int fan = stats.optInt("fan", -1);
+                updateRaceStatus(json, month, half, fan, isRaceTurn);
+
+                // ★ 拉面杯 Gauge 状态栏
                 if ("Ramen".equals(currentScenario)) {
                     updateRamenInfo(json);
+                } else {
+                    if (tvRamenGauge != null) tvRamenGauge.setVisibility(View.GONE);
                 }
 
                 // ★ 队员显示（育马者杯）
@@ -652,18 +665,203 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      * 更新拉面杯剧本特有信息
      * 显示: CheckpointPt进度, 隠し味の秘訣数量, 推荐类型, 已选地域
      */
+    /**
+     * 比赛回合检测 + 生涯目标粉丝数状态栏
+     * 
+     * race_entry_type (single_mode_turn 表):
+     *   0 = 非比赛
+     *   1 = 有可选比赛
+     *   2 = 生涯目标必须赛
+     *   3 = 有马纪念（年终固定）
+     *
+     * 生涯目标粉丝数阈值（按角色卡 career goal）:
+     *   - 部分角色有粉丝生涯目标（如10000/30000/60000等）
+     *   - 未达标 → 育成直接结束
+     */
+    private void updateRaceStatus(JSONObject json, int month, int half, int fan, boolean fallbackRaceTurn) {
+        if (tvRaceStatus == null) return;
+
+        StringBuilder sb = new StringBuilder();
+        int color = 0xFF888888;
+
+        // 粉丝数
+        if (fan >= 0) {
+            sb.append("ファン").append(fan);
+        }
+
+        // 比赛回合判断 — 用 turn_config
+        boolean isRaceTurn = false;
+        boolean isMandatoryRace = false;
+        if (month > 0 && half > 0) {
+            int currentTurn = (month - 1) * 2 + half; // 简化: month1前=1, month1後=2...
+            JSONArray turnConfig = getTurnConfig();
+            if (turnConfig != null) {
+                // 找当前 month/half 对应的 turn
+                for (int i = 0; i < turnConfig.length(); i++) {
+                    JSONObject tc = turnConfig.optJSONObject(i);
+                    if (tc == null) continue;
+                    int tcMonth = tc.optInt("month", 0);
+                    int tcHalf = tc.optInt("half", 0);
+                    if (tcMonth == month && tcHalf == half) {
+                        int raceEntry = tc.optInt("race_entry", 0);
+                        if (raceEntry == 2) {
+                            isRaceTurn = true;
+                            isMandatoryRace = true;
+                        } else if (raceEntry == 1) {
+                            isRaceTurn = true;
+                        } else if (raceEntry == 3) {
+                            isRaceTurn = true; // 有马纪念
+                        }
+                        break;
+                    }
+                }
+            } else {
+                // turn_config 没拉到 → 用旧逻辑兜底
+                isRaceTurn = fallbackRaceTurn;
+            }
+        }
+
+        if (isRaceTurn) {
+            if (sb.length() > 0) sb.append(" ");
+            if (isMandatoryRace) {
+                sb.append("★目標レース");
+                color = 0xFFFF4444;
+            } else {
+                sb.append("○レース有");
+                color = 0xFF4FC3F7;
+            }
+        }
+
+        // 生涯目标粉丝数警告 — 检查 scenario_progress 中的目标
+        // 生涯目标在 summary 里没有直接返回，需要通过 /log/turn 或 scenario_progress 推断
+        // 简化: 在关键节点（年末）提醒粉丝数
+        if (fan >= 0 && month > 0) {
+            // 常见粉丝目标阈值
+            String warning = checkFanGoalWarning(month, half, fan);
+            if (warning != null) {
+                if (sb.length() > 0) sb.append(" ");
+                sb.append(warning);
+                color = 0xFFFF6600;
+            }
+        }
+
+        if (sb.length() > 0) {
+            tvRaceStatus.setText(sb.toString());
+            tvRaceStatus.setTextColor(color);
+            tvRaceStatus.setVisibility(View.VISIBLE);
+        } else {
+            tvRaceStatus.setVisibility(View.GONE);
+        }
+    }
+
+    private String checkFanGoalWarning(int month, int half, int fan) {
+        // 生涯目标常见粉丝阈值节点（经典/资深）
+        // 这些是大部分角色的共性目标，具体角色可能不同
+        // 只在临近节点时警告
+        
+        // 第一年底(6月後/12月後): 部分角色有粉丝目标
+        // 第二年中(6月前/後): 日本德比等 G1 前需要一定粉丝
+        // 第二年底(12月前/後): 有马纪念前需要粉丝
+        // 第三年: 各种 G1 前粉丝需求
+        
+        // 常见阈值: 1000, 3000, 5000, 7000, 10000, 15000, 20000, 30000, 60000
+        // 只在 fans < threshold 且接近时间节点时提醒
+        
+        // 简化: 按 month/half 节点判断
+        int turn = (month - 1) * 2 + half; // 1-12
+        
+        // 第一年底 (turn 11-12): 需要 ~1000 粉丝
+        if (turn >= 10 && turn <= 12 && fan < 1000) {
+            return "⚠目標ファン不足(<1000)";
+        }
+        // 第二年中 (turn 15-18): 需要 ~3000
+        if (turn >= 15 && turn <= 18 && fan < 3000) {
+            return "⚠目標ファン不足(<3000)";
+        }
+        // 第二年底 (turn 23-24): 需要 ~5000
+        if (turn >= 22 && turn <= 24 && fan < 5000) {
+            return "⚠目標ファン不足(<5000)";
+        }
+        // 第三年中 (turn 27-30): 需要 ~10000
+        if (turn >= 27 && turn <= 30 && fan < 10000) {
+            return "⚠目標ファン不足(<10000)";
+        }
+        // 第三年底 (turn 35-36): 有马纪念 ~20000
+        if (turn >= 34 && turn <= 36 && fan < 20000) {
+            return "⚠目標ファン不足(<20000)";
+        }
+        
+        return null;
+    }
+
+    private JSONArray getTurnConfig() {
+        // 缓存 10 分钟
+        if (turnConfigCache != null && System.currentTimeMillis() - turnConfigCacheTime < 600000) {
+            return turnConfigCache;
+        }
+        // 异步拉取 /log/turn
+        new Thread(() -> {
+            String data = httpGet("http://127.0.0.1:18765/log/turn");
+            if (data == null || data.isEmpty()) return;
+            try {
+                JSONObject json = new JSONObject(data);
+                JSONArray tc = json.optJSONArray("turn_config");
+                if (tc != null) {
+                    turnConfigCache = tc;
+                    turnConfigCacheTime = System.currentTimeMillis();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "getTurnConfig error: " + e.getMessage());
+            }
+        }).start();
+        return turnConfigCache;
+    }
+
     private void updateRamenInfo(JSONObject json) {
         JSONObject ramen = json.optJSONObject("ramen");
-        if (ramen == null) return;
+        if (ramen == null) {
+            if (tvRamenGauge != null) tvRamenGauge.setVisibility(View.GONE);
+            return;
+        }
 
         StringBuilder info = new StringBuilder();
 
-        // CheckpointPt
+        // ★ 試食会 盛り上がりレベル (moriagari_level)
+        // 0-5, 从 CheckpointPt 阈值计算: 50/120/210/330/480
+        int moriagari = ramen.optInt("moriagari_level", -1);
         int cppt = ramen.optInt("checkpoint_pt", -1);
-        int ecppt = ramen.optInt("expected_checkpoint_pt", -1); // may not exist in summary
-        if (cppt >= 0) {
-            info.append("CP:").append(cppt);
-            if (ecppt > cppt) info.append("/").append(ecppt);
+        if (moriagari >= 0 || cppt >= 0) {
+            if (moriagari < 0 && cppt >= 0) {
+                // 自行计算
+                if (cppt >= 480) moriagari = 5;
+                else if (cppt >= 330) moriagari = 4;
+                else if (cppt >= 210) moriagari = 3;
+                else if (cppt >= 120) moriagari = 2;
+                else if (cppt >= 50) moriagari = 1;
+                else moriagari = 0;
+            }
+            // 进度条: Lv0~5, 每级用 □/■ 表示
+            StringBuilder bar = new StringBuilder();
+            for (int i = 0; i < 5; i++) {
+                bar.append(i < moriagari ? "■" : "□");
+            }
+            info.append("盛").append(bar).append(" Lv").append(moriagari);
+            if (cppt >= 0) {
+                info.append(" (").append(cppt);
+                // 下一级阈值
+                int nextThreshold = -1;
+                switch (moriagari) {
+                    case 0: nextThreshold = 50; break;
+                    case 1: nextThreshold = 120; break;
+                    case 2: nextThreshold = 210; break;
+                    case 3: nextThreshold = 330; break;
+                    case 4: nextThreshold = 480; break;
+                }
+                if (nextThreshold > 0) {
+                    info.append("/").append(nextThreshold);
+                }
+                info.append(")");
+            }
             info.append(" ");
         }
 
@@ -688,28 +886,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             info.append(rtName).append(" ");
         }
 
-        // FeelingInfo array - count and types
-        JSONArray feelingInfo = ramen.optJSONArray("feeling_info");
-        if (feelingInfo != null && feelingInfo.length() > 0) {
-            int goodCount = 0, badCount = 0;
-            for (int fi = 0; fi < feelingInfo.length(); fi++) {
-                JSONObject fe = feelingInfo.optJSONObject(fi);
-                if (fe == null) continue;
-                int fType = fe.optInt("FeelingType", 0);
-                if (fType == 10 || fType == 11) goodCount++;  // 練習上手/練習◎
-                else if (fType >= 1 && fType <= 7) badCount++; // BC系
-            }
-            if (goodCount > 0) info.append("良効:").append(goodCount).append(" ");
-            if (badCount > 0) info.append("悪効:").append(badCount).append(" ");
-        }
-
-        // SelectedRegionIds
-        JSONArray regionIds = ramen.optJSONArray("selected_region_ids");
-        if (regionIds != null && regionIds.length() > 0) {
-            info.append("地域:").append(regionIds.length());
-        }
-
-        // ★ v3.22.57: Gauge gains display — training gauge progress from SO
+        // ★ Gauge gains — 试食会训练 gauge 进度
         JSONArray gaugeGains = ramen.optJSONArray("gauge_gains");
         if (gaugeGains != null && gaugeGains.length() > 0) {
             StringBuilder ggStr = new StringBuilder();
@@ -720,7 +897,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 int gVal = gg.optInt("gauge", 0);
                 if (gVal > 0) {
                     if (ggStr.length() > 0) ggStr.append(" ");
-                    // Short label: 速+3 耐+1 etc.
                     String shortName;
                     switch (gName) {
                         case "Speed": shortName = "速"; break;
@@ -734,13 +910,44 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (ggStr.length() > 0) {
-                info.append(" ゲージ:").append(ggStr);
+                info.append("ゲージ:").append(ggStr);
             }
         }
 
-        // Display in buff_detail area
-        if (tvBuffDetail != null && info.length() > 0) {
-            tvBuffDetail.setText(info.toString().trim());
+        // Display in ramen gauge status bar
+        if (tvRamenGauge != null && info.length() > 0) {
+            tvRamenGauge.setText(info.toString().trim());
+            tvRamenGauge.setVisibility(View.VISIBLE);
+        } else if (tvRamenGauge != null) {
+            tvRamenGauge.setVisibility(View.GONE);
+        }
+
+        // Also keep the old buff_detail display for FeelingInfo/Region
+        StringBuilder buffInfo = new StringBuilder();
+
+        // FeelingInfo array - count and types
+        JSONArray feelingInfo = ramen.optJSONArray("feeling_info");
+        if (feelingInfo != null && feelingInfo.length() > 0) {
+            int goodCount = 0, badCount = 0;
+            for (int fi = 0; fi < feelingInfo.length(); fi++) {
+                JSONObject fe = feelingInfo.optJSONObject(fi);
+                if (fe == null) continue;
+                int fType = fe.optInt("FeelingType", 0);
+                if (fType == 10 || fType == 11) goodCount++;
+                else if (fType >= 1 && fType <= 7) badCount++;
+            }
+            if (goodCount > 0) buffInfo.append("良効:").append(goodCount).append(" ");
+            if (badCount > 0) buffInfo.append("悪効:").append(badCount).append(" ");
+        }
+
+        // SelectedRegionIds
+        JSONArray regionIds = ramen.optJSONArray("selected_region_ids");
+        if (regionIds != null && regionIds.length() > 0) {
+            buffInfo.append("地域:").append(regionIds.length());
+        }
+
+        if (tvBuffDetail != null && buffInfo.length() > 0) {
+            tvBuffDetail.setText(buffInfo.toString().trim());
             tvBuffDetail.setVisibility(View.VISIBLE);
         }
     }
@@ -1859,6 +2066,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             // 事件推荐面板
             evtPanel = floatingView.findViewById(R.id.evt_panel);
             tvEvtContent = floatingView.findViewById(R.id.tv_evt_content);
+            // 比赛/目标状态栏 + 拉面杯 Gauge
+            tvRaceStatus = floatingView.findViewById(R.id.tv_race_status);
+            tvRamenGauge = floatingView.findViewById(R.id.tv_ramen_gauge);
 
             // ★ 初始化剧本标签
             updateScenarioLabel();
