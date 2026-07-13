@@ -119,6 +119,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     // turn_config 缓存（从 /log/turn 拉取一次）
     private JSONArray turnConfigCache = null;
     private long turnConfigCacheTime = 0;
+    // 生涯目标缓存（从 MDB single_mode_route_race 查）
+    private JSONArray routeRaceCache = null;
+    private long routeRaceCacheTime = 0;
     // 胜鞍面板
     private View saddlePanel;
     private TextView tvSaddleContent;
@@ -662,21 +665,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      *   "team_rank": 3, "dream_left": 2
      */
     /**
-     * 更新拉面杯剧本特有信息
-     * 显示: CheckpointPt进度, 隠し味の秘訣数量, 推荐类型, 已选地域
-     */
-    /**
      * 比赛回合检测 + 生涯目标粉丝数状态栏
-     * 
-     * race_entry_type (single_mode_turn 表):
-     *   0 = 非比赛
-     *   1 = 有可选比赛
-     *   2 = 生涯目标必须赛
-     *   3 = 有马纪念（年终固定）
      *
-     * 生涯目标粉丝数阈值（按角色卡 career goal）:
-     *   - 部分角色有粉丝生涯目标（如10000/30000/60000等）
-     *   - 未达标 → 育成直接结束
+     * race_entry_type (single_mode_turn 表):
+     *   0 = 非比赛（训练回合）
+     *   1 = 有比赛可选（非强制）
+     *
+     * 生涯目标 (single_mode_route_race 表):
+     *   target_type=1 = 生涯目标（必须完成，否则育成结束）
+     *   condition_type=3 = 粉丝数条件
+     *   condition_value_1 = 需要的粉丝数
+     *   turn = 检查回合（从育成开始算，1-78）
      */
     private void updateRaceStatus(JSONObject json, int month, int half, int fan, boolean fallbackRaceTurn) {
         if (tvRaceStatus == null) return;
@@ -690,13 +689,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
 
         // 比赛回合判断 — 用 turn_config
+        // race_entry_type: 0=非比赛, 1=有比赛可选
         boolean isRaceTurn = false;
-        boolean isMandatoryRace = false;
         if (month > 0 && half > 0) {
-            int currentTurn = (month - 1) * 2 + half; // 简化: month1前=1, month1後=2...
             JSONArray turnConfig = getTurnConfig();
             if (turnConfig != null) {
-                // 找当前 month/half 对应的 turn
                 for (int i = 0; i < turnConfig.length(); i++) {
                     JSONObject tc = turnConfig.optJSONObject(i);
                     if (tc == null) continue;
@@ -704,44 +701,56 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     int tcHalf = tc.optInt("half", 0);
                     if (tcMonth == month && tcHalf == half) {
                         int raceEntry = tc.optInt("race_entry", 0);
-                        if (raceEntry == 2) {
+                        if (raceEntry == 1) {
                             isRaceTurn = true;
-                            isMandatoryRace = true;
-                        } else if (raceEntry == 1) {
-                            isRaceTurn = true;
-                        } else if (raceEntry == 3) {
-                            isRaceTurn = true; // 有马纪念
                         }
                         break;
                     }
                 }
             } else {
-                // turn_config 没拉到 → 用旧逻辑兜底
                 isRaceTurn = fallbackRaceTurn;
             }
         }
 
         if (isRaceTurn) {
             if (sb.length() > 0) sb.append(" ");
-            if (isMandatoryRace) {
-                sb.append("★目標レース");
-                color = 0xFFFF4444;
-            } else {
-                sb.append("○レース有");
-                color = 0xFF4FC3F7;
-            }
+            sb.append("○レース有");
+            color = 0xFF4FC3F7;
         }
 
-        // 生涯目标粉丝数警告 — 检查 scenario_progress 中的目标
-        // 生涯目标在 summary 里没有直接返回，需要通过 /log/turn 或 scenario_progress 推断
-        // 简化: 在关键节点（年末）提醒粉丝数
+        // 生涯目标粉丝数警告 — 查 MDB single_mode_route_race
+        // condition_type=3 → 粉丝数条件, condition_value_1=需要的粉丝数
+        // turn=检查回合(从游戏开始算), target_type=1=生涯目标
         if (fan >= 0 && month > 0) {
-            // 常见粉丝目标阈值
-            String warning = checkFanGoalWarning(month, half, fan);
-            if (warning != null) {
-                if (sb.length() > 0) sb.append(" ");
-                sb.append(warning);
-                color = 0xFFFF6600;
+            int currentTurn = (month - 1) * 2 + half;
+            JSONArray routeRaces = getRouteRaceTargets();
+            if (routeRaces != null) {
+                int nearestFanTarget = 0;
+                int nearestTurn = 0;
+                for (int i = 0; i < routeRaces.length(); i++) {
+                    JSONObject rr = routeRaces.optJSONObject(i);
+                    if (rr == null) continue;
+                    int targetType = rr.optInt("target_type", 0);
+                    int condType = rr.optInt("condition_type", 0);
+                    int turn = rr.optInt("turn", 0);
+                    int condValue = rr.optInt("condition_value_1", 0);
+                    // 只看生涯目标 + 粉丝条件 + 还没过去的回合
+                    if (targetType == 1 && condType == 3 && condValue > 0 && turn >= currentTurn) {
+                        if (nearestFanTarget == 0 || turn < nearestTurn) {
+                            nearestFanTarget = condValue;
+                            nearestTurn = turn;
+                        }
+                    }
+                }
+                if (nearestFanTarget > 0 && fan < nearestFanTarget) {
+                    int turnsLeft = nearestTurn - currentTurn;
+                    if (sb.length() > 0) sb.append(" ");
+                    sb.append("⚠目標ファン<").append(nearestFanTarget);
+                    if (turnsLeft > 0) {
+                        sb.append(" (あと").append(turnsLeft).append("T)");
+                    }
+                    color = 0xFFFF6600;
+                }
             }
         }
 
@@ -754,44 +763,44 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         }
     }
 
-    private String checkFanGoalWarning(int month, int half, int fan) {
-        // 生涯目标常见粉丝阈值节点（经典/资深）
-        // 这些是大部分角色的共性目标，具体角色可能不同
-        // 只在临近节点时警告
-        
-        // 第一年底(6月後/12月後): 部分角色有粉丝目标
-        // 第二年中(6月前/後): 日本德比等 G1 前需要一定粉丝
-        // 第二年底(12月前/後): 有马纪念前需要粉丝
-        // 第三年: 各种 G1 前粉丝需求
-        
-        // 常见阈值: 1000, 3000, 5000, 7000, 10000, 15000, 20000, 30000, 60000
-        // 只在 fans < threshold 且接近时间节点时提醒
-        
-        // 简化: 按 month/half 节点判断
-        int turn = (month - 1) * 2 + half; // 1-12
-        
-        // 第一年底 (turn 11-12): 需要 ~1000 粉丝
-        if (turn >= 10 && turn <= 12 && fan < 1000) {
-            return "⚠目標ファン不足(<1000)";
+    private JSONArray getRouteRaceTargets() {
+        if (routeRaceCache != null && System.currentTimeMillis() - routeRaceCacheTime < 600000) {
+            return routeRaceCache;
         }
-        // 第二年中 (turn 15-18): 需要 ~3000
-        if (turn >= 15 && turn <= 18 && fan < 3000) {
-            return "⚠目標ファン不足(<3000)";
-        }
-        // 第二年底 (turn 23-24): 需要 ~5000
-        if (turn >= 22 && turn <= 24 && fan < 5000) {
-            return "⚠目標ファン不足(<5000)";
-        }
-        // 第三年中 (turn 27-30): 需要 ~10000
-        if (turn >= 27 && turn <= 30 && fan < 10000) {
-            return "⚠目標ファン不足(<10000)";
-        }
-        // 第三年底 (turn 35-36): 有马纪念 ~20000
-        if (turn >= 34 && turn <= 36 && fan < 20000) {
-            return "⚠目標ファン不足(<20000)";
-        }
-        
-        return null;
+        new Thread(() -> {
+            try {
+                String sql = "SELECT race_set_id, target_type, turn, condition_type, condition_value_1" +
+                        " FROM single_mode_route_race" +
+                        " WHERE target_type=1 AND condition_type=3 AND condition_value_1>0" +
+                        " ORDER BY turn";
+                String encoded = java.net.URLEncoder.encode(sql, "UTF-8");
+                String data = httpGet("http://127.0.0.1:18765/mdb/raw?sql=" + encoded);
+                if (data == null || data.isEmpty()) return;
+                JSONObject json = new JSONObject(data);
+                JSONArray rows = json.optJSONArray("rows");
+                if (rows != null) {
+                    // 转成对象数组方便使用
+                    JSONArray targetArr = new JSONArray();
+                    for (int i = 0; i < rows.length(); i++) {
+                        JSONArray row = rows.optJSONArray(i);
+                        if (row == null || row.length() < 5) continue;
+                        JSONObject obj = new JSONObject();
+                        obj.put("race_set_id", row.optInt(0));
+                        obj.put("target_type", row.optInt(1));
+                        obj.put("turn", row.optInt(2));
+                        obj.put("condition_type", row.optInt(3));
+                        obj.put("condition_value_1", row.optInt(4));
+                        targetArr.put(obj);
+                    }
+                    routeRaceCache = targetArr;
+                    routeRaceCacheTime = System.currentTimeMillis();
+                    Log.d(TAG, "Route race targets cached: " + targetArr.length() + " entries");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "getRouteRaceTargets error: " + e.getMessage());
+            }
+        }).start();
+        return routeRaceCache;
     }
 
     private JSONArray getTurnConfig() {
