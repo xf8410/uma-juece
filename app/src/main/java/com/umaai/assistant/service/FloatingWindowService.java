@@ -44,7 +44,7 @@ import java.util.Iterator;
  * 小黑板风格浮窗服务 v1.24
  * 黑底+彩色文字，显示插件推送的 /summary 数据
  * 支持剧本切换（Spinner选择+广播通知）
- * 支持剧本buff显示（青・緑・桃 / 新剧本适配）
+ * 支持剧本buff显示（青/绿/桃 / 新剧本适配）
  *
  * 数据来源：插件 v3.10.0+ 主动 POST /summary JSON 到 18766
  */
@@ -284,9 +284,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                 int val = ae.optInt("value", 0);
                                 String catName;
                                 switch (cat) {
-                                    case 1: catName = "試食会"; break;
-                                    case 2: catName = "地域"; break;
-                                    case 4: catName = "隠し味"; break;
+                                    case 1: catName = "试食会"; break;
+                                    case 2: catName = "地区"; break;
+                                    case 4: catName = "隐味"; break;
                                     default: catName = "Cat" + cat; break;
                                 }
                                 JSONObject buffItem = new JSONObject();
@@ -324,7 +324,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                     switch (cat) {
                                         case 1: catName = "試食会"; break;
                                         case 2: catName = "地域"; break;
-                                        case 4: catName = "隠し味"; break;
+                                        case 4: catName = "隐味"; break;
                                         default: catName = "Cat" + cat; break;
                                     }
                                     JSONObject buffItem = new JSONObject();
@@ -601,7 +601,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         } catch (Exception e) {
             Log.w(TAG, "AI parse error: " + e.getMessage());
-            tvRecommend.setText("▶ AI解析エラー");
+            tvRecommend.setText("▶ AI解析错误");
             tvRecommend.setTextColor(0xFFFF4444);
             if (tvAiDetail != null) tvAiDetail.setVisibility(View.GONE);
         }
@@ -685,7 +685,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         // 粉丝数
         if (fan >= 0) {
-            sb.append("ファン").append(fan);
+            sb.append("粉丝").append(fan);
         }
 
         // 比赛回合判断 — 用 turn_config
@@ -714,7 +714,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         if (isRaceTurn) {
             if (sb.length() > 0) sb.append(" ");
-            sb.append("○レース有");
+            sb.append("○有比赛");
             color = 0xFF4FC3F7;
         }
 
@@ -745,9 +745,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (nearestFanTarget > 0 && fan < nearestFanTarget) {
                     int turnsLeft = nearestTurn - currentTurn;
                     if (sb.length() > 0) sb.append(" ");
-                    sb.append("⚠目標ファン<").append(nearestFanTarget);
+                    sb.append("⚠目标粉丝<").append(nearestFanTarget);
                     if (turnsLeft > 0) {
-                        sb.append(" (あと").append(turnsLeft).append("T)");
+                        sb.append(" (剩").append(turnsLeft).append("回合)");
                     }
                     color = 0xFFFF6600;
                 }
@@ -835,7 +835,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         StringBuilder info = new StringBuilder();
 
-        // ★ 試食会 盛り上がりレベル (moriagari_level)
+        // ★ 试食会 热度等级 (moriagari_level)
         // 0-5, 从 CheckpointPt 阈值计算: 50/120/210/330/480
         int moriagari = ramen.optInt("moriagari_level", -1);
         int cppt = ramen.optInt("checkpoint_pt", -1);
@@ -854,7 +854,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             for (int i = 0; i < 5; i++) {
                 bar.append(i < moriagari ? "■" : "□");
             }
-            info.append("盛").append(bar).append(" Lv").append(moriagari);
+            info.append("热").append(bar).append(" Lv").append(moriagari);
             if (cppt >= 0) {
                 info.append(" (").append(cppt);
                 // 下一级阈值
@@ -874,10 +874,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             info.append(" ");
         }
 
-        // SpecialFeelingNum (隠し味の秘訣 count)
+        // SpecialFeelingNum (隐藏调味料秘方数量)
         int sfn = ramen.optInt("special_feeling_num", -1);
         if (sfn >= 0) {
-            info.append("隠味:").append(sfn).append(" ");
+            info.append("隐味:").append(sfn).append(" ");
         }
 
         // RecommendType
@@ -885,11 +885,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (rt >= 0) {
             String rtName;
             switch (rt) {
-                case 1: rtName = "速度推"; break;
-                case 2: rtName = "耐力推"; break;
-                case 3: rtName = "根性推"; break;
-                case 4: rtName = "力推"; break;
-                case 5: rtName = "智力推"; break;
+                case 1: rtName = "速推荐"; break;
+                case 2: rtName = "耐推荐"; break;
+                case 3: rtName = "根推荐"; break;
+                case 4: rtName = "力推荐"; break;
+                case 5: rtName = "智推荐"; break;
                 default: rtName = "推" + rt; break;
             }
             info.append(rtName).append(" ");
@@ -919,7 +919,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (ggStr.length() > 0) {
-                info.append("ゲージ:").append(ggStr);
+                info.append("槽:").append(ggStr);
             }
         }
 
@@ -945,14 +945,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (fType == 10 || fType == 11) goodCount++;
                 else if (fType >= 1 && fType <= 7) badCount++;
             }
-            if (goodCount > 0) buffInfo.append("良効:").append(goodCount).append(" ");
-            if (badCount > 0) buffInfo.append("悪効:").append(badCount).append(" ");
+            if (goodCount > 0) buffInfo.append("好效:").append(goodCount).append(" ");
+            if (badCount > 0) buffInfo.append("坏效:").append(badCount).append(" ");
         }
 
         // SelectedRegionIds
         JSONArray regionIds = ramen.optJSONArray("selected_region_ids");
         if (regionIds != null && regionIds.length() > 0) {
-            buffInfo.append("地域:").append(regionIds.length());
+            buffInfo.append("地区:").append(regionIds.length());
         }
 
         if (tvBuffDetail != null && buffInfo.length() > 0) {
@@ -1525,13 +1525,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     saddleStr.append(name).append("(").append(point).append(")");
                 }
             }
-            sb.append("相性ボーナス: ").append(relationBonusCount).append("種 ")
+            sb.append("相性加成: ").append(relationBonusCount).append("种 ")
               .append(totalPoints).append("pt\n");
             if (saddleStr.length() > 0) {
                 sb.append(saddleStr).append("\n");
             }
         } else {
-            sb.append("G1勝鞍なし\n");
+            sb.append("无G1胜鞍\n");
         }
 
         // 亲马胜鞍
@@ -1554,7 +1554,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 JSONArray pSaddles = parent.optJSONArray("saddles");
                 sb.append(label).append("(").append(charaId).append("): ");
                 if (pCount == 0 || pSaddles == null || pSaddles.length() == 0) {
-                    sb.append("なし\n");
+                    sb.append("无\n");
                     continue;
                 }
                 int overlap = 0;
@@ -1569,9 +1569,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         pStr.append("★").append(name);
                     }
                 }
-                sb.append(pCount).append("種");
+                sb.append(pCount).append("种");
                 if (overlap > 0) {
-                    sb.append(" 一致").append(overlap).append("種\n");
+                    sb.append(" 一致").append(overlap).append("种\n");
                     sb.append(pStr).append("\n");
                 } else {
                     sb.append("\n");
@@ -1594,7 +1594,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (rgStr.length() > 0) {
-                sb.append("MDB相性テーブル: ").append(rgStr);
+                sb.append("MDB相性表: ").append(rgStr);
             }
         }
 
@@ -2291,11 +2291,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         Log.d(TAG, "Manual upload requested, turns: " + dataCollector.getTurnCount());
                         dataCollector.finalizeAndUpload();
                         Toast.makeText(FloatingWindowService.this,
-                            dataCollector.getTurnCount() + "ターン分をアップロード中...",
+                            dataCollector.getTurnCount() + "回合数据上传中...",
                             Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(FloatingWindowService.this,
-                            "アップロードするデータがありません", Toast.LENGTH_SHORT).show();
+                            "没有可上传的数据", Toast.LENGTH_SHORT).show();
                     }
                 }
             }

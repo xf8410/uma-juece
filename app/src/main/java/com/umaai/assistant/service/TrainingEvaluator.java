@@ -41,27 +41,27 @@ public class TrainingEvaluator {
     /** 训练类型偏好 [速训, 耐训, 力训, 根训, 智训] — URA默认 */
     private static final double[] TRAIN_TYPE_BONUS_DEFAULT = {20.0, 10.0, 30.0, 30.0, 20.0};
 
-    /** クライマックス偏好 — Pt更值钱 */
+    /** 巅峰杯偏好 — Pt更值钱 */
     private static final double[] TRAIN_TYPE_BONUS_CLIMAX = {20.0, 10.0, 30.0, 30.0, 25.0};
-    /** アオハル杯偏好 — 团队羁绊更重要 */
+    /** 青春杯偏好 — 团队羁绊更重要 */
     private static final double[] TRAIN_TYPE_BONUS_AOHARU = {20.0, 15.0, 25.0, 25.0, 20.0};
-    /** グランドライブ偏好 — 偶像杯 */
+    /** 光辉巡游偏好 — 偶像杯 */
     private static final double[] TRAIN_TYPE_BONUS_GRAND_DRIVE = {25.0, 10.0, 25.0, 25.0, 20.0};
-    /** グランドマスターズ偏好 — 女神杯 */
+    /** 大师杯偏好 — 女神杯 */
     private static final double[] TRAIN_TYPE_BONUS_GRAND_MASTERS = {20.0, 15.0, 25.0, 25.0, 20.0};
     /** L'Arc偏好 — 海外远征 */
     private static final double[] TRAIN_TYPE_BONUS_LARC = {20.0, 15.0, 30.0, 25.0, 20.0};
     /** UAF偏好 — 运动会 */
     private static final double[] TRAIN_TYPE_BONUS_UAF = {25.0, 15.0, 25.0, 25.0, 20.0};
-    /** 豊食祭偏好 — 种田 */
+    /** 丰食祭偏好 — 种田 */
     private static final double[] TRAIN_TYPE_BONUS_HARVEST = {20.0, 10.0, 30.0, 30.0, 20.0};
-    /** メカ偏好 — 赛博 */
+    /** 机体杯偏好 — 赛博 */
     private static final double[] TRAIN_TYPE_BONUS_MECHA = {25.0, 15.0, 25.0, 20.0, 20.0};
     /** Legends偏好 — 传奇 */
     private static final double[] TRAIN_TYPE_BONUS_LEGENDS = {20.0, 15.0, 25.0, 25.0, 20.0};
-    /** 無人島偏好 */
+    /** 无人岛偏好 */
     private static final double[] TRAIN_TYPE_BONUS_DESERT = {25.0, 15.0, 25.0, 20.0, 20.0};
-    /** 温泉郷偏好 */
+    /** 温泉乡偏好 */
     private static final double[] TRAIN_TYPE_BONUS_HOTSPRING = {25.0, 15.0, 25.0, 20.0, 20.0};
     /** Dreams偏好 — 育马者杯 */
     private static final double[] TRAIN_TYPE_BONUS_DREAMS = {25.0, 15.0, 25.0, 25.0, 20.0};
@@ -451,7 +451,7 @@ public class TrainingEvaluator {
                 break;
 
             case "Legends":
-                // 传奇杯: 导き系统
+                // 传奇杯: 引导系统
                 break;
 
             case "DesertIsland":

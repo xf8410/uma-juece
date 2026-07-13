@@ -95,7 +95,7 @@
             android:layout_weight="1"
             android:textColor="#88CC88"
             android:textSize="12sp"
-            android:text="データ収集: 待機中" />
+            android:text="数据采集: 待机中" />
 
         <Button
             android:id="@+id/btn_upload_data"
