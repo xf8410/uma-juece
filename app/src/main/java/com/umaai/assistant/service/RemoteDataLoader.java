@@ -38,13 +38,14 @@ public class RemoteDataLoader {
     private static final String TAG = "UmaData";
     public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 3; // 升级版本号触发重新加载
+    private static final int CACHE_VERSION = 4; // 升级版本号触发重新加载
 
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";
     public static final String KEY_SKILLS = "skills";
     public static final String KEY_FACTORS = "factors";
     public static final String KEY_SUPPORT_CARDS = "support_cards";
+    public static final String KEY_SUPPORT_CARD_DATA = "support_card_data";
     private static final String KEY_CACHE_VER = "cache_version";
 
     // 文件缓存目录名
@@ -64,15 +65,18 @@ public class RemoteDataLoader {
             boolean skillsOk = loadAndCache(prefs, cacheDir, KEY_SKILLS, DATA_BASE + "/uma_skills.json");
             boolean factorsOk = loadAndCache(prefs, cacheDir, KEY_FACTORS, DATA_BASE + "/uma_factors.json");
             boolean scOk = loadAndCache(prefs, cacheDir, KEY_SUPPORT_CARDS, DATA_BASE + "/uma_support_cards.json");
+            boolean scDataOk = loadAndCache(prefs, cacheDir, KEY_SUPPORT_CARD_DATA, DATA_BASE + "/support_card_data.json");
 
             // API2: 事件数据（含Values数组，~12MB）
             boolean eventsOk = loadAndCache(prefs, cacheDir, KEY_EVENTS, DATA_BASE + "/uma_events.json");
 
-            if (namesOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
-
-            boolean allOk = namesOk && eventsOk && skillsOk && factorsOk;
+            boolean allOk = namesOk && eventsOk && skillsOk && factorsOk && scOk && scDataOk;
+            // 只有本版本所需数据全部可用时才更新版本号，避免完整卡库下载失败后
+            // 被误判为缓存完成，导致后续启动不再重试。
+            if (allOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
             Log.d(TAG, "Data load: names=" + namesOk + " events=" + eventsOk
-                    + " skills=" + skillsOk + " factors=" + factorsOk);
+                    + " skills=" + skillsOk + " factors=" + factorsOk
+                    + " supportPatch=" + scOk + " supportData=" + scDataOk);
 
             if (cb != null) cb.onLoaded(allOk);
         }).start();
@@ -81,8 +85,13 @@ public class RemoteDataLoader {
     public static boolean isCached(Context ctx) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         if (prefs.getInt(KEY_CACHE_VER, 0) < CACHE_VERSION) return false;
-        // events必须存在（文件或SP均可）
-        return getCachedData(ctx, KEY_EVENTS) != null;
+        // 版本号必须与本版本所需的全部缓存文件同时成立。
+        return getCachedData(ctx, KEY_NAMES) != null
+                && getCachedData(ctx, KEY_EVENTS) != null
+                && getCachedData(ctx, KEY_SKILLS) != null
+                && getCachedData(ctx, KEY_FACTORS) != null
+                && getCachedData(ctx, KEY_SUPPORT_CARDS) != null
+                && getCachedData(ctx, KEY_SUPPORT_CARD_DATA) != null;
     }
 
     /** 获取缓存数据：优先从文件缓存读，fallback到SP */

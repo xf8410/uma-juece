@@ -144,6 +144,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private int lastEvtStoryId = 0;
     // 支援卡ID→名称缓存
     private java.util.Map<Integer, String> supportCardNameCache = null;
+    private java.util.Map<Integer, Integer> supportCardCharaCache = null;
+    private java.util.Map<Integer, String> supportCardTypeCache = null;
     private java.util.Map<Integer, String> npcNameCache = null;
 
     // HTTP服务
@@ -435,10 +437,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // ★ 训练等级显示
                 JSONArray trainLevels = json.optJSONArray("training_levels");
                 updateTrainingLevels(trainLevels);
-
-                // ★ 羁绊概要（显示在设施栏）
-                JSONArray evaluation = json.optJSONArray("evaluation");
-                updateEvaluationInfo(evaluation);
 
                 // ★ v1.24: 比赛回合检测 — 默认不是比赛，减轻误判
                 // 只有当完全没有训练数据或month<=0时才判定为比赛中/加载中
@@ -1183,43 +1181,23 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      * 加载支援卡ID→角色名和 NPC ID→名称的缓存
      * 数据来源: uma_support_cards.json (RemoteDataLoader 缓存) + uma_names.json
      */
+    /**
+     * 加载支援卡ID→真实角色名/类型及角色、NPC名称。
+     * support_card_data.json 是完整卡库；uma_support_cards.json 仅作为新卡名称补丁。
+     */
     private void ensureNameCaches() {
-        if (supportCardNameCache != null && npcNameCache != null) return;
+        if (supportCardNameCache != null && supportCardCharaCache != null
+                && supportCardTypeCache != null && npcNameCache != null) return;
+        supportCardNameCache = new java.util.HashMap<>();
+        supportCardCharaCache = new java.util.HashMap<>();
+        supportCardTypeCache = new java.util.HashMap<>();
+        npcNameCache = new java.util.HashMap<>();
         try {
-            File cacheDir = getDir("uma_data_cache", Context.MODE_PRIVATE);
-            // 加载支援卡名称
-            File scFile = new File(cacheDir, RemoteDataLoader.KEY_SUPPORT_CARDS);
-            if (scFile.exists()) {
-                String content = readFile(scFile);
-                JSONObject scJson = new JSONObject(content);
-                supportCardNameCache = new java.util.HashMap<>();
-                // uma_support_cards.json 格式: {"_meta":..., "30242": {"cardId":30242, "chara":"アーモンドアイ", ...}}
-                JSONArray keys = scJson.names();
-                if (keys != null) {
-                    for (int i = 0; i < keys.length(); i++) {
-                        String key = keys.optString(i);
-                        if ("_meta".equals(key)) continue;
-                        JSONObject card = scJson.optJSONObject(key);
-                        if (card == null) continue;
-                        int cardId = card.optInt("cardId", 0);
-                        String chara = card.optString("chara", "");
-                        String title = card.optString("title", "");
-                        if (cardId > 0 && !chara.isEmpty()) {
-                            // 用角色名（短名），如果有 title 也可以后续加
-                            supportCardNameCache.put(cardId, chara);
-                        }
-                    }
-                }
-                Log.d(TAG, "Support card name cache loaded: " + supportCardNameCache.size() + " cards");
-            }
-            // 加载 NPC 名称
-            File namesFile = new File(cacheDir, RemoteDataLoader.KEY_NAMES);
-            if (namesFile.exists()) {
-                String content = readFile(namesFile);
-                JSONObject namesJson = new JSONObject(content);
-                npcNameCache = new java.util.HashMap<>();
-                JSONArray rows = namesJson.optJSONArray("data");
-                if (rows == null) rows = namesJson.optJSONArray("rows");
+            String namesContent = RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_NAMES);
+            if (namesContent != null) {
+                JSONObject namesJson = new JSONObject(namesContent);
+                JSONArray rows = namesJson.optJSONArray("rows");
+                if (rows == null) rows = namesJson.optJSONArray("data");
                 if (rows != null) {
                     for (int i = 0; i < rows.length(); i++) {
                         JSONObject row = rows.optJSONObject(i);
@@ -1227,27 +1205,61 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         int id = row.optInt("id", 0);
                         String name = row.optString("name", "");
                         String nickname = row.optString("nickname", "");
-                        if (id > 0) {
-                            // 优先用 nickname（短名），没有就用 name
+                        if (id > 0 && (!nickname.isEmpty() || !name.isEmpty())) {
                             npcNameCache.put(id, !nickname.isEmpty() ? nickname : name);
                         }
                     }
                 }
-                Log.d(TAG, "NPC name cache loaded: " + npcNameCache.size() + " entries");
             }
+
+            String fullCardContent = RemoteDataLoader.getCachedData(
+                    this, RemoteDataLoader.KEY_SUPPORT_CARD_DATA);
+            if (fullCardContent != null) {
+                JSONArray rows = new JSONObject(fullCardContent).optJSONArray("rows");
+                if (rows != null) {
+                    for (int i = 0; i < rows.length(); i++) {
+                        JSONObject row = rows.optJSONObject(i);
+                        if (row == null) continue;
+                        int cardId = row.optInt("id", 0);
+                        int charaId = row.optInt("chara_id", 0);
+                        int cardType = row.optInt("support_card_type", 0);
+                        if (cardId <= 0) continue;
+                        if (charaId > 0) {
+                            supportCardCharaCache.put(cardId, charaId);
+                            String name = npcNameCache.get(charaId);
+                            if (name != null && !name.isEmpty()) supportCardNameCache.put(cardId, name);
+                        }
+                        if (cardType == 1) supportCardTypeCache.put(cardId, "支援");
+                        else if (cardType == 2) supportCardTypeCache.put(cardId, "友人");
+                        else if (cardType == 3) supportCardTypeCache.put(cardId, "团队");
+                    }
+                }
+            }
+
+            String patchContent = RemoteDataLoader.getCachedData(
+                    this, RemoteDataLoader.KEY_SUPPORT_CARDS);
+            if (patchContent != null) {
+                JSONObject patch = new JSONObject(patchContent);
+                JSONArray keys = patch.names();
+                if (keys != null) {
+                    for (int i = 0; i < keys.length(); i++) {
+                        String key = keys.optString(i);
+                        if ("_meta".equals(key)) continue;
+                        JSONObject card = patch.optJSONObject(key);
+                        if (card == null) continue;
+                        int cardId = card.optInt("cardId", 0);
+                        String chara = card.optString("chara", "");
+                        if (cardId > 0 && !chara.isEmpty()) supportCardNameCache.put(cardId, chara);
+                    }
+                }
+            }
+            Log.d(TAG, "Name caches: cards=" + supportCardNameCache.size()
+                    + " links=" + supportCardCharaCache.size()
+                    + " types=" + supportCardTypeCache.size()
+                    + " names=" + npcNameCache.size());
         } catch (Exception e) {
             Log.e(TAG, "ensureNameCaches error: " + e.getMessage());
         }
-        if (supportCardNameCache == null) supportCardNameCache = new java.util.HashMap<>();
-        if (npcNameCache == null) npcNameCache = new java.util.HashMap<>();
-    }
-
-    private String readFile(File f) throws Exception {
-        java.io.FileInputStream fis = new java.io.FileInputStream(f);
-        byte[] buf = new byte[(int) f.length()];
-        fis.read(buf);
-        fis.close();
-        return new String(buf, "UTF-8");
     }
 
     private void updateRamenBuffs(JSONArray buffs) throws JSONException {
@@ -1436,46 +1448,45 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (p == null) continue;
                 int partnerId = p.optInt("partner_id", 0);
                 if (partnerId <= 0) continue;
-                if (partnerStr.length() > 0) partnerStr.append(" ");
-                int pType = p.optInt("partner_type", -1);
-                int bond = p.optInt("current_bond", -1);
-                boolean isShining = p.optBoolean("is_shining", false);
+                int supportPosition = p.isNull("support_position")
+                        ? 0 : p.optInt("support_position", 0);
+                int supportCardId = p.isNull("support_card_id")
+                        ? 0 : p.optInt("support_card_id", 0);
+                // 兼容旧 SO，但只使用明确的 support_position，绝不按数字范围分类。
+                if (supportCardId <= 0 && supportPosition > 0) {
+                    supportCardId = positionToCardId.getOrDefault(supportPosition, 0);
+                }
+                int bond = p.isNull("current_bond") ? -1 : p.optInt("current_bond", -1);
+                boolean shiningKnown = p.has("is_shining") && !p.isNull("is_shining");
+                boolean isShining = shiningKnown && p.optBoolean("is_shining", false);
                 boolean isHint = p.optBoolean("is_tips_event", false);
 
-                String pName = "";
-                if (partnerId >= 1 && partnerId <= 6) {
-                    // 支援卡 — 用 support_card_id 查名称
-                    int scId = positionToCardId.getOrDefault(partnerId, 0);
-                    if (scId > 0 && supportCardNameCache != null) {
-                        pName = supportCardNameCache.getOrDefault(scId, "");
-                    }
-                    if (pName.isEmpty()) pName = "卡" + partnerId;
-                    // pType 从 support_card_type 推断
-                    if (pType < 0) pType = 2; // 默认普通支援卡
-                } else {
-                    // NPC — 用 uma_names.json 查名称
-                    if (npcNameCache != null) {
-                        pName = npcNameCache.getOrDefault(partnerId, "");
-                    }
+                String pName;
+                String displayType = "";
+                if (supportCardId > 0) {
+                    pName = supportCardNameCache.getOrDefault(supportCardId, "");
                     if (pName.isEmpty()) {
-                        // 常见 NPC ID
-                        if (partnerId == 9002) pName = "理事长";
-                        else if (partnerId == 103) pName = "记者";
-                        else pName = "NPC" + partnerId;
+                        int charaId = supportCardCharaCache.getOrDefault(supportCardId, 0);
+                        if (charaId > 0) pName = npcNameCache.getOrDefault(charaId, "");
                     }
-                    if (pType < 0) pType = 3;
+                    if (pName.isEmpty()) pName = "支援卡" + supportCardId;
+                    displayType = supportCardTypeCache.getOrDefault(supportCardId, "支援");
+                } else {
+                    // partner_id 未证实等于 uma_names.id，不能据此编造 NPC 名称/类型。
+                    String soName = p.optString("name", "");
+                    if (!soName.isEmpty() && !soName.startsWith("伙伴")
+                            && !"NPC".equals(soName)) pName = soName;
+                    else pName = "伙伴" + partnerId;
                 }
-                // 友人卡前缀
-                if (pType == 1) pName = "[友]" + pName;
-                // 羁绊
-                if (bond >= 0 && bond < 100) {
-                    pName = pName + ":" + bond;
-                }
-                // 彩圈标记
-                if (isShining) pName = "★" + pName;
-                // Hint 标记
-                if (isHint) pName = "!" + pName;
-                partnerStr.append(pName);
+
+                StringBuilder one = new StringBuilder();
+                if (!displayType.isEmpty()) one.append("[").append(displayType).append("]");
+                one.append(pName).append(" 羁绊").append(bond >= 0 ? bond : "?");
+                if (isShining) one.append(" 彩圈");
+                else if (!shiningKnown && supportCardId > 0) one.append(" 彩圈?");
+                if (isHint) one.append(" Hint");
+                if (partnerStr.length() > 0) partnerStr.append("\n");
+                partnerStr.append(one);
             }
         }
 
@@ -1548,30 +1559,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     lvViews[i].setVisibility(View.GONE);
                 }
             }
-        }
-    }
-
-    private void updateEvaluationInfo(JSONArray evaluation) {
-        if (tvFacility == null || evaluation == null || evaluation.length() == 0) return;
-        try {
-            int maxEval = 0;
-            int appearCount = 0;
-            for (int i = 0; i < evaluation.length(); i++) {
-                JSONObject ev = evaluation.getJSONObject(i);
-                int eval = ev.optInt("evaluation", 0);
-                int isAppear = ev.optInt("is_appear", 1); // ★ v2.3: 默认1兼容无此字段的schema
-                if (isAppear != 0 && eval > maxEval) {
-                    maxEval = eval;
-                }
-                if (isAppear != 0) appearCount++;
-            }
-            if (appearCount > 0) {
-                String existing = tvFacility.getText().toString();
-                String evalStr = "絆" + maxEval;
-                tvFacility.setText(existing.isEmpty() ? evalStr : existing + " " + evalStr);
-            }
-        } catch (JSONException e) {
-            Log.w(TAG, "evaluation parse error: " + e.getMessage());
         }
     }
 
