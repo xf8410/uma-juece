@@ -194,10 +194,12 @@ public class DataCollector {
         // ★ v2.0: 防御 — 检查是否是 error JSON
         if (json == null) return ACTION_ERROR;
         if (json.has("error") || json.has("sigsegv_recovered") || json.has("panic_caught")) {
-            Log.w(TAG, "Received error summary, marking as Error turn");
-            // 记录错误回合但不崩溃
+            Log.w(TAG, "Received error summary, recording gap (not overwriting action)");
+            // ★ v2.2: 不覆盖 prevSnapshot.actionTaken — 错误不是玩家动作
+            // 只记录数据断档事件
             if (prevSnapshot != null) {
-                prevSnapshot.actionTaken = ACTION_ERROR;
+                // 保留上一个真实动作标签不变
+                Log.d(TAG, "Summary gap at turn after " + prevSnapshot.turn);
             }
             return ACTION_ERROR;
         }
@@ -212,14 +214,38 @@ public class DataCollector {
 
             String detectedAction = ACTION_UNKNOWN;
 
-            // 检测是否新育成开始（回合重置到1）
-            if (prevSnapshot != null && snapshot.turn <= 1 && prevSnapshot.turn > 1) {
-                // ★ v2.0: 用 isFinalizing 防重复
+            // ★ v2.2: 新育成检测 — 不能只靠 turn<=1，还要检查 chara_id 变化
+            // 跨年时 month=1 half=1 会导致旧逻辑误判为新育成
+            boolean isNewSession = false;
+            if (prevSnapshot != null) {
+                // 条件1: turn 从大跳到小（且不是同 year 的正常流动）
+                if (snapshot.turn <= 1 && prevSnapshot.turn > 1) {
+                    // 可能是跨年（year 2→3 month 1）或真正新育成
+                    // 如果 chara_id 变了 → 确定是新育成
+                    if (snapshot.charaId > 0 && prevSnapshot.charaId > 0
+                            && snapshot.charaId != prevSnapshot.charaId) {
+                        isNewSession = true;
+                    } else if (snapshot.charaId > 0 && prevSnapshot.charaId > 0
+                            && snapshot.charaId == prevSnapshot.charaId) {
+                        // 同角色 → 可能是跨年误判，不结束 session
+                        Log.d(TAG, "Turn reset but same chara_id=" + snapshot.charaId
+                            + " — likely year transition, not new session");
+                    } else {
+                        // chara_id 未知 → 保守判断，用 scenario 变化
+                        if (snapshot.scenario != null && prevSnapshot.scenario != null
+                                && !snapshot.scenario.equals(prevSnapshot.scenario)) {
+                            isNewSession = true;
+                        }
+                        // 否则不结束 session
+                    }
+                }
+            }
+
+            if (isNewSession) {
                 if (!isFinalizing) {
-                    Log.d(TAG, "Session " + sessionId + " ended (turn reset), uploading...");
+                    Log.d(TAG, "Session " + sessionId + " ended (new session detected), uploading...");
                     finalizeAndUpload();
                 }
-                // finalizeAndUpload 内部会 startNewSession
             }
 
             // ★ v2.0: finalizeAndUpload 可能已经 startNewSession，此时 prevSnapshot 已清
@@ -234,19 +260,15 @@ public class DataCollector {
 
             // 检测玩家行动
             if (snapshot.turn > prevSnapshot.turn) {
-                // ★ v2.0: 检测回合跳跃（非连续）
+                // ★ v2.2: 检测回合跳跃（非连续）— 不伪造全0回合，只记录 gap
                 int turnDelta = snapshot.turn - prevSnapshot.turn;
                 if (turnDelta > 1) {
                     Log.w(TAG, "Turn jump: " + prevSnapshot.turn + " → " + snapshot.turn
-                        + " (gap=" + (turnDelta - 1) + "), marking missing turns");
-                    // 填充缺失回合为 Unknown
-                    for (int g = 1; g < turnDelta; g++) {
-                        TurnSnapshot missing = new TurnSnapshot();
-                        missing.turn = prevSnapshot.turn + g;
-                        missing.actionTaken = ACTION_UNKNOWN;
-                        missing.scenario = scenario;
-                        turns.add(missing);
-                    }
+                        + " (gap=" + (turnDelta - 1) + "), recording gap (not faking turns)");
+                    // ★ v2.2: 不再插入全0伪快照，只记录 gap 区间
+                    // 训练导出时会跳过跨 gap 的动作标签
+                    // gap 信息记录在 session JSON 的 "gaps" 数组里
+                    // 这里只是 log，gap 信息在 toJson 时从 turns 的 turn 差值推断
                 }
 
                 detectedAction = detectAction(prevSnapshot, snapshot);
@@ -315,7 +337,24 @@ public class DataCollector {
 
             s.month = json.optInt("month", 1);
             s.half = json.optInt("half", 1);
-            s.turn = (s.month - 1) * 2 + s.half;
+            // ★ v2.2: 累计 turn 计算 — 如果 SO 提供了 "turn" 字段直接用
+            int soTurn = json.optInt("turn", 0);
+            if (soTurn > 0) {
+                s.turn = soTurn;
+            } else {
+                // ★ v2.2: 从 year + month + half 计算
+                // 赛马娘育成：year 1 从 4 月开始，每年 12 个月 × 2 half = 24 turn
+                // year=1 month=4 half=1 → turn 1
+                // year=2 month=1 half=1 → turn 19
+                // year=3 month=1 half=1 → turn 43
+                int year = json.optInt("year", 0);
+                if (year > 0) {
+                    s.turn = (year - 1) * 24 + (s.month - 1) * 2 + s.half;
+                } else {
+                    // 无 year 字段 — 旧逻辑兜底，但标记可能跨年错误
+                    s.turn = (s.month - 1) * 2 + s.half;
+                }
+            }
             s.scenario = json.optString("scenario", "");
             s.charaId = json.optInt("chara_id", 0);
             s.storyId = json.optInt("story_id", 0);
