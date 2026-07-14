@@ -444,6 +444,52 @@ public class DataCollector {
     // ========================================================================
 
     /**
+     * ★ v2.1: 通过 training_levels 变化检测动作
+     * training_levels 格式: [{"command_id":101,"level":3}, {"command_id":102,"level":2}, ...]
+     * 训练后等级+1的那个 command_id 就是选中的训练
+     * 映射: 101=Speed, 102=Stamina, 103=Guts, 105=Power, 106=Wiz
+     */
+    private String detectActionByTrainingLevels(TurnSnapshot prev, TurnSnapshot curr) {
+        if (prev.trainingLevelsRaw == null || curr.trainingLevelsRaw == null) return null;
+        try {
+            JSONArray prevLevels = new JSONArray(prev.trainingLevelsRaw);
+            JSONArray currLevels = new JSONArray(curr.trainingLevelsRaw);
+            if (prevLevels.length() != currLevels.length()) return null;
+
+            // 建 command_id → level 映射
+            java.util.Map<Integer, Integer> prevMap = new java.util.HashMap<>();
+            java.util.Map<Integer, Integer> currMap = new java.util.HashMap<>();
+            for (int i = 0; i < prevLevels.length(); i++) {
+                JSONObject pl = prevLevels.optJSONObject(i);
+                if (pl != null) prevMap.put(pl.optInt("command_id", 0), pl.optInt("level", 0));
+                JSONObject cl = currLevels.optJSONObject(i);
+                if (cl != null) currMap.put(cl.optInt("command_id", 0), cl.optInt("level", 0));
+            }
+
+            // 找等级+1的 command_id
+            for (java.util.Map.Entry<Integer, Integer> entry : currMap.entrySet()) {
+                int cmdId = entry.getKey();
+                int currLv = entry.getValue();
+                int prevLv = prevMap.getOrDefault(cmdId, 0);
+                if (currLv > prevLv) {
+                    // 等级提升了
+                    switch (cmdId) {
+                        case 101: return ACTION_SPEED;
+                        case 102: return ACTION_STAMINA;
+                        case 103: return ACTION_GUTS;
+                        case 105: return ACTION_POWER;
+                        case 106: return ACTION_WISDOM;
+                        default: break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "detectActionByTrainingLevels error: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
      * 对比前后两个快照，检测玩家采取的行动
      * ★ v2.0: 优先用 command_id 直接映射，gains 全0时不跳过
      */
@@ -468,6 +514,11 @@ public class DataCollector {
                 + Math.abs(dGuts) + Math.abs(dWisdom) < 10) {
             return ACTION_REST;
         }
+
+        // ★ v2.1: 优先用 training_levels 变化检测
+        // 训练后等级+1的那个就是选中的训练
+        String levelAction = detectActionByTrainingLevels(prev, curr);
+        if (levelAction != null) return levelAction;
 
         // ★ v2.0: 优先用 command_id 映射（如果 prev 快照有训练数据）
         // 找属性变化最大的方向，然后匹配有对应 command_id 的训练

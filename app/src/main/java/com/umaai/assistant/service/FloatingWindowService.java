@@ -1134,6 +1134,47 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     }
 
 
+    /**
+     * 拉面杯效果 ID → 中文名称映射
+     *
+     * MDB single_mode_14_basic_effect / region_effect 表的 effect_type 字段:
+     *   2  = 速度加成
+     *   3  = 耐力加成
+     *   4  = 力量加成
+     *   5  = 根性加成
+     *   6  = 智力加成
+     *   15 = 技能点加成
+     *   19 = 隐藏调味料效果
+     *   22 = 全属性加成
+     *   30 = 训练 gauge 加成
+     *   40 = 干劲上升
+     *   41 = 体力恢复
+     *
+     * name 格式: "试食会#1234" / "地区#5678" / "隐味#9012"
+     * 返回: "速+15%" / "全+30%" / "隐味+1" 等
+     */
+    private String resolveRamenEffectName(String rawName, int effectId) {
+        if (rawName == null || rawName.isEmpty()) return "?";
+
+        // 解析 category 前缀
+        String prefix;
+        if (rawName.startsWith("试食会") || rawName.startsWith("試食会")) {
+            prefix = "试食";
+        } else if (rawName.startsWith("地区") || rawName.startsWith("地域")) {
+            prefix = "地域";
+        } else if (rawName.startsWith("隐味") || rawName.startsWith("隠味")) {
+            prefix = "隐味";
+        } else {
+            // 不是已知格式，直接返回去掉 #ID 后的名称
+            int hashIdx = rawName.indexOf('#');
+            return hashIdx >= 0 ? rawName.substring(0, hashIdx) : rawName;
+        }
+
+        // 从 desc 字段推断效果类型（如果调用方已经设了 desc）
+        // 这里只能返回前缀，具体数值由调用方拼接
+        return prefix;
+    }
+
     private void updateRamenBuffs(JSONArray buffs) throws JSONException {
         StringBuilder effectStr = new StringBuilder();
         String urafType = "";
@@ -1145,19 +1186,20 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             String type = b.optString("type", "");
 
             if ("Ramen".equals(type)) {
-                if (name.startsWith("裏風:")) {
+                if (name.startsWith("裏風:") || name.startsWith("里风:")) {
                     urafType = name;
                     urafState = b.optString("state", "");
                 } else {
-                    // ★ v3.18.8: show desc (+XX%) if available, else name+val
                     String desc = b.optString("desc", "");
                     int val = b.optInt("EffectValue", 0);
+                    // ★ 把 "试食会#1234" 映射为具体效果名
+                    String displayName = resolveRamenEffectName(name, b.optInt("EffectId", 0));
                     if (effectStr.length() > 0) effectStr.append(" ");
                     if (!desc.isEmpty()) {
-                        effectStr.append(name).append(desc);
+                        effectStr.append(displayName).append(desc);
                     } else {
-                        effectStr.append(name);
-                        if (val > 0) effectStr.append(val);
+                        effectStr.append(displayName);
+                        if (val > 0) effectStr.append("+").append(val);
                     }
                 }
             }
@@ -1276,6 +1318,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         int failureRate = -1;
         int heads = -1;
         int shining = -1;
+        int supportCardHeads = 0;
+        int npcHeads = 0;
+        JSONArray partners = null;
         if (cmdId > 0) {
             for (int i = 0; i < trainings.length(); i++) {
                 JSONObject tr = trainings.getJSONObject(i);
@@ -1284,7 +1329,23 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     failureRate = tr.optInt("failure_rate", -1);
                     heads = tr.optInt("heads", -1);
                     shining = tr.optInt("shining", -1);
+                    partners = tr.optJSONArray("partners");
                     break;
+                }
+            }
+        }
+
+        // ★ 区分支援卡伙伴和 NPC 伙伴
+        // partner_id 1-6 = 支援卡位置, 其他 = NPC/场景伙伴
+        if (partners != null) {
+            for (int pi = 0; pi < partners.length(); pi++) {
+                JSONObject p = partners.optJSONObject(pi);
+                if (p == null) continue;
+                int partnerId = p.optInt("partner_id", 0);
+                if (partnerId >= 1 && partnerId <= 6) {
+                    supportCardHeads++;
+                } else {
+                    npcHeads++;
                 }
             }
         }
@@ -1296,11 +1357,22 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (failureRate > 0) {
             gainText.append(" ⚠").append(failureRate).append("%");
         }
-        if (heads > 0) {
-            gainText.append(" ★").append(heads);
+        // ★ 人头显示：区分支援卡和 NPC
+        // 支援卡人头用 ●, NPC 用 △, 彩圈用 ★
+        if (supportCardHeads > 0 || npcHeads > 0) {
+            if (supportCardHeads > 0) {
+                gainText.append(" ●").append(supportCardHeads);
+            }
+            if (npcHeads > 0) {
+                gainText.append(" △").append(npcHeads);
+            }
+        } else if (heads > 0) {
+            // 兜底：partners 数据缺失时用 heads
+            gainText.append(" ●").append(heads);
         }
+        // ★ 彩圈：只显示 >0 的值，-1/null 不显示
         if (shining > 0) {
-            gainText.append(" !!").append(shining);
+            gainText.append(" ★").append(shining);
         }
 
         if (gainText.length() > 0) {
