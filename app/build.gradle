@@ -27,6 +27,9 @@ android {
         versionName "1.24"
 
         // Inject GitHub token at build time — not in source code
+        // ★ 安全警告: Token 编译进 APK 可被反编译提取
+        // 长期方案: 改用后端代理上传，不在 APK 中存储可写 Token
+        // 短期缓解: 使用 fine-grained token, 只允许 uma-data, 最小权限, 短有效期
         buildConfigField "String", "GITHUB_TOKEN", "\"${secretsProps.getProperty('GITHUB_TOKEN', '')}\""
     }
 
