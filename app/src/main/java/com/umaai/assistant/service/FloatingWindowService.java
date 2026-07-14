@@ -1439,7 +1439,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             for (int i = 0; i < evaluation.length(); i++) {
                 JSONObject ev = evaluation.getJSONObject(i);
                 int eval = ev.optInt("evaluation", 0);
-                int isAppear = ev.optInt("is_appear", 0);
+                int isAppear = ev.optInt("is_appear", 1); // ★ v2.3: 默认1兼容无此字段的schema
                 if (isAppear != 0 && eval > maxEval) {
                     maxEval = eval;
                 }

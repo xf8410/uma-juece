@@ -190,7 +190,11 @@ public class DataCollector {
      * 处理一次 /summary 数据推送
      * @return 检测到的行动类型（如果是新回合）
      */
-    public String onSummaryData(JSONObject json) {
+    // ★ v2.3: 去重 — 同一 turn 的相同快照不重复处理
+    private int lastProcessedTurn = -1;
+    private String lastSnapshotHash = "";
+
+    public synchronized String onSummaryData(JSONObject json) {
         // ★ v2.0: 防御 — 检查是否是 error JSON
         if (json == null) return ACTION_ERROR;
         if (json.has("error") || json.has("sigsegv_recovered") || json.has("panic_caught")) {
@@ -211,6 +215,17 @@ public class DataCollector {
         try {
             TurnSnapshot snapshot = parseSnapshot(json);
             if (snapshot == null) return ACTION_ERROR;
+
+            // ★ v2.3: 去重 — 同一 turn 的相同快照不重复处理（push+poll 可能同时到达）
+            String snapHash = snapshot.speed + "," + snapshot.stamina + ","
+                + snapshot.power + "," + snapshot.guts + "," + snapshot.wisdom
+                + "," + snapshot.vital + "," + snapshot.turn;
+            if (snapshot.turn == lastProcessedTurn && snapHash.equals(lastSnapshotHash)) {
+                Log.d(TAG, "Duplicate summary for turn " + snapshot.turn + ", skipping");
+                return ACTION_UNKNOWN;
+            }
+            lastProcessedTurn = snapshot.turn;
+            lastSnapshotHash = snapHash;
 
             String detectedAction = ACTION_UNKNOWN;
 
