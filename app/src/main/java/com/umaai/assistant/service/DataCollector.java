@@ -843,11 +843,87 @@ public class DataCollector {
                 session.put("final_stats", finalStats);
             }
 
+            // ★ v2.3: 数据质量验证器
+            JSONObject validation = validateSession();
+            session.put("validation", validation);
+
             return session;
         } catch (JSONException e) {
             Log.e(TAG, "buildSessionJson error: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * ★ v2.3: 数据质量验证器 — 上传前校验 session 数据完整性
+     */
+    private JSONObject validateSession() {
+        JSONObject v = new JSONObject();
+        try {
+            boolean valid = true;
+            JSONArray errors = new JSONArray();
+            JSONArray warnings = new JSONArray();
+
+            // 1. turns 单调递增
+            int prevTurn = 0;
+            int gapCount = 0;
+            int unknownActionCount = 0;
+            int zeroGainCount = 0;
+            int totalTurns = turns.size();
+            for (int i = 0; i < turns.size(); i++) {
+                TurnSnapshot t = turns.get(i);
+                if (t.turn <= prevTurn) {
+                    errors.put("Turn not monotonic at index " + i + ": " + t.turn + " <= " + prevTurn);
+                    valid = false;
+                }
+                if (t.turn > prevTurn + 1 && prevTurn > 0) {
+                    gapCount++;
+                }
+                prevTurn = t.turn;
+                if ("Unknown".equals(t.actionTaken)) unknownActionCount++;
+                if (t.trainings != null) {
+                    boolean allZero = true;
+                    for (TrainingOption opt : t.trainings) {
+                        if (opt.gainSpeed + opt.gainStamina + opt.gainPower
+                                + opt.gainGuts + opt.gainWisdom > 0) {
+                            allZero = false;
+                            break;
+                        }
+                    }
+                    if (allZero) zeroGainCount++;
+                }
+            }
+
+            // 2. 文件名 == session_id (由调用方保证)
+
+            // 3. 无全0伪快照
+            for (int i = 0; i < turns.size(); i++) {
+                TurnSnapshot t = turns.get(i);
+                if (t.speed == 0 && t.stamina == 0 && t.power == 0
+                        && t.guts == 0 && t.wisdom == 0 && t.vital == 0) {
+                    errors.put("All-zero snapshot at turn " + t.turn);
+                    valid = false;
+                }
+            }
+
+            // 4. action_source 存在
+            for (int i = 0; i < turns.size(); i++) {
+                TurnSnapshot t = turns.get(i);
+                if (t.actionSource == null || t.actionSource.isEmpty()) {
+                    warnings.put("Missing action_source at turn " + t.turn);
+                }
+            }
+
+            v.put("valid", valid);
+            v.put("errors", errors);
+            v.put("warnings", warnings);
+            v.put("gap_count", gapCount);
+            v.put("unknown_action_ratio", totalTurns > 0 ? (double) unknownActionCount / totalTurns : 0.0);
+            v.put("zero_gain_ratio", totalTurns > 0 ? (double) zeroGainCount / totalTurns : 0.0);
+        } catch (JSONException e) {
+            Log.e(TAG, "validateSession error: " + e.getMessage());
+        }
+        return v;
     }
 
     /**
