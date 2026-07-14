@@ -44,6 +44,7 @@ public class RemoteDataLoader {
     public static final String KEY_EVENTS = "events";
     public static final String KEY_SKILLS = "skills";
     public static final String KEY_FACTORS = "factors";
+    public static final String KEY_SUPPORT_CARDS = "support_cards";
     private static final String KEY_CACHE_VER = "cache_version";
 
     // 文件缓存目录名
@@ -62,6 +63,7 @@ public class RemoteDataLoader {
             boolean namesOk = loadAndCache(prefs, cacheDir, KEY_NAMES, DATA_BASE + "/uma_names.json");
             boolean skillsOk = loadAndCache(prefs, cacheDir, KEY_SKILLS, DATA_BASE + "/uma_skills.json");
             boolean factorsOk = loadAndCache(prefs, cacheDir, KEY_FACTORS, DATA_BASE + "/uma_factors.json");
+            boolean scOk = loadAndCache(prefs, cacheDir, KEY_SUPPORT_CARDS, DATA_BASE + "/uma_support_cards.json");
 
             // API2: 事件数据（含Values数组，~12MB）
             boolean eventsOk = loadAndCache(prefs, cacheDir, KEY_EVENTS, DATA_BASE + "/uma_events.json");
