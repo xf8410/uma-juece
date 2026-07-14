@@ -1335,18 +1335,45 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
-        // ★ 区分支援卡伙伴和 NPC 伙伴
-        // partner_id 1-6 = 支援卡位置, 其他 = NPC/场景伙伴
+        // ★ 伙伴显示：照 PC 版小黑板格式
+        // personType: 1=友人卡, 2=普通支援卡, 3=NPC, 4=理事长, 5=记者
+        // 显示: 名称:羁绊【彩】【Hint】
+        StringBuilder partnerStr = new StringBuilder();
         if (partners != null) {
             for (int pi = 0; pi < partners.length(); pi++) {
                 JSONObject p = partners.optJSONObject(pi);
                 if (p == null) continue;
                 int partnerId = p.optInt("partner_id", 0);
-                if (partnerId >= 1 && partnerId <= 6) {
-                    supportCardHeads++;
-                } else {
-                    npcHeads++;
+                if (partnerId <= 0) continue;
+                if (partnerStr.length() > 0) partnerStr.append(" ");
+                // 从 SO 的 partner_type 和 name 字段获取
+                int pType = p.optInt("partner_type", -1);
+                String pName = p.optString("name", "");
+                int bond = p.optInt("current_bond", -1);
+                boolean isShining = p.optBoolean("is_shining", false);
+                boolean isHint = p.optBoolean("is_tips_event", false);
+
+                if (pName == null || pName.isEmpty()) {
+                    // 兜底：partner_id 1-6 = 支援卡, >6 = NPC
+                    if (partnerId >= 1 && partnerId <= 6) {
+                        pName = "卡" + partnerId;
+                        pType = 2;
+                    } else {
+                        pName = "NPC";
+                        pType = 3;
+                    }
                 }
+                // 友人卡前缀
+                if (pType == 1) pName = "[友]" + pName;
+                // 羁绊
+                if (bond >= 0 && bond < 100) {
+                    pName = pName + ":" + bond;
+                }
+                // 彩圈标记
+                if (isShining) pName = "★" + pName;
+                // Hint 标记
+                if (isHint) pName = "!" + pName;
+                partnerStr.append(pName);
             }
         }
 
@@ -1357,20 +1384,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (failureRate > 0) {
             gainText.append(" ⚠").append(failureRate).append("%");
         }
-        // ★ 人头显示：区分支援卡和 NPC
-        // 支援卡人头用 ●, NPC 用 △, 彩圈用 ★
-        if (supportCardHeads > 0 || npcHeads > 0) {
-            if (supportCardHeads > 0) {
-                gainText.append(" ●").append(supportCardHeads);
-            }
-            if (npcHeads > 0) {
-                gainText.append(" △").append(npcHeads);
-            }
-        } else if (heads > 0) {
-            // 兜底：partners 数据缺失时用 heads
-            gainText.append(" ●").append(heads);
+        // ★ 伙伴名称显示（照 PC 版小黑板）
+        if (partnerStr.length() > 0) {
+            gainText.append("\n").append(partnerStr);
         }
-        // ★ 彩圈：只显示 >0 的值，-1/null 不显示
+        // ★ 彩圈数量（只显示 >0 的值，-1/null 不显示）
         if (shining > 0) {
             gainText.append(" ★").append(shining);
         }
