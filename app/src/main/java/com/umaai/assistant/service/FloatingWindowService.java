@@ -421,15 +421,15 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
 
                 // 五维属性 + 该属性的训练增益
-                updateStatFromSummary(tvSpdVal, tvSpdGain, stats, trainings,
+                updateStatFromSummary(tvSpdVal, tvSpdGain, stats, trainings, json,
                         "speed", "Speed", COLOR_SPD, COLOR_SPD_DIM);
-                updateStatFromSummary(tvStaVal, tvStaGain, stats, trainings,
+                updateStatFromSummary(tvStaVal, tvStaGain, stats, trainings, json,
                         "stamina", "Stamina", COLOR_STA, COLOR_STA_DIM);
-                updateStatFromSummary(tvPwrVal, tvPwrGain, stats, trainings,
+                updateStatFromSummary(tvPwrVal, tvPwrGain, stats, trainings, json,
                         "power", "Power", COLOR_PWR, COLOR_PWR_DIM);
-                updateStatFromSummary(tvGutVal, tvGutGain, stats, trainings,
+                updateStatFromSummary(tvGutVal, tvGutGain, stats, trainings, json,
                         "guts", "Guts", COLOR_GUT, COLOR_GUT_DIM);
-                updateStatFromSummary(tvWitVal, tvWitGain, stats, trainings,
+                updateStatFromSummary(tvWitVal, tvWitGain, stats, trainings, json,
                         "wiz", "Wiz", COLOR_WIT, COLOR_WIT_DIM);
 
                 // ★ 训练等级显示
@@ -1367,6 +1367,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private void updateStatFromSummary(TextView tvVal, TextView tvGain,
                                         JSONObject stats, JSONArray trainings,
+                                        JSONObject fullJson,
                                         String statKey, String gainKey,
                                         int brightColor, int dimColor) throws JSONException {
         int current = stats.getInt(statKey);
@@ -1419,7 +1420,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (partners != null) {
             // 建 position → support_card_id 映射
             java.util.Map<Integer, Integer> positionToCardId = new java.util.HashMap<>();
-            JSONArray supportCards = json.optJSONArray("support_cards");
+            JSONArray supportCards = fullJson.optJSONArray("support_cards");
             if (supportCards != null) {
                 for (int si = 0; si < supportCards.length(); si++) {
                     JSONObject sc = supportCards.optJSONObject(si);
