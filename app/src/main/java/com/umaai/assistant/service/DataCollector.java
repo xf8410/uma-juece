@@ -265,18 +265,46 @@ public class DataCollector {
                 if (turnDelta > 1) {
                     Log.w(TAG, "Turn jump: " + prevSnapshot.turn + " → " + snapshot.turn
                         + " (gap=" + (turnDelta - 1) + "), recording gap (not faking turns)");
-                    // ★ v2.2: 不再插入全0伪快照，只记录 gap 区间
-                    // 训练导出时会跳过跨 gap 的动作标签
-                    // gap 信息记录在 session JSON 的 "gaps" 数组里
-                    // 这里只是 log，gap 信息在 toJson 时从 turns 的 turn 差值推断
                 }
 
+                // ★ v2.3: 优先使用 SO hook 捕获的真实动作
+                JSONObject lastAction = json.optJSONObject("last_action");
+                if (lastAction != null) {
+                    String soAction = lastAction.optString("action", "");
+                    int soCmdId = lastAction.optInt("raw_command_id", -1);
+                    int soNormId = lastAction.optInt("normalized_command_id", -1);
+                    int soSeq = lastAction.optInt("sequence", 0);
+                    if (!soAction.isEmpty() && !"None".equals(soAction) && soCmdId >= 0) {
+                        detectedAction = soAction;
+                        Log.d(TAG, "Turn " + prevSnapshot.turn + " → " + snapshot.turn
+                            + " action: " + detectedAction + " (source=training_hook, seq=" + soSeq
+                            + ", cmd_id=" + soCmdId + ")");
+                        prevSnapshot.actionTaken = detectedAction;
+                        prevSnapshot.actionSource = "training_hook";
+                        prevSnapshot.actionConfidence = 1.0;
+                        prevSnapshot.actionCommandId = soNormId;
+                        prevSnapshot.actionRawCommandId = soCmdId;
+                        turns.add(prevSnapshot);
+                        uploadCurrentSession(false);
+                        // 更新scenario
+                        if (snapshot.scenario != null && !snapshot.scenario.isEmpty()) {
+                            scenario = snapshot.scenario;
+                        }
+                        prevSnapshot = snapshot;
+                        persistState();
+                        return detectedAction;
+                    }
+                }
+
+                // 回退到推断
                 detectedAction = detectAction(prevSnapshot, snapshot);
                 Log.d(TAG, "Turn " + prevSnapshot.turn + " → " + snapshot.turn
-                    + " action: " + detectedAction);
+                    + " action: " + detectedAction + " (source=inference)");
 
                 // 记录上一回合的行动
                 prevSnapshot.actionTaken = detectedAction;
+                prevSnapshot.actionSource = "stat_delta_inference";
+                prevSnapshot.actionConfidence = 0.4;
                 turns.add(prevSnapshot);
 
                 // ★ v2.0: 串行上传（不再每回合开新线程）
@@ -402,8 +430,11 @@ public class DataCollector {
 
                     opt.failureRate = tr.optInt("failure_rate", 0);
                     // ★ v2.0: 统一 shining/heads 的 -1/null/0 → 0
-                    opt.shining = Math.max(0, tr.optInt("shining", 0));
-                    opt.heads = Math.max(0, tr.optInt("heads", 0));
+                    // ★ v2.3: shining/heads — 保留 -1（未知），不洗成 0
+                    int sh = tr.optInt("shining", -1);
+                    opt.shining = sh; // -1=unknown, 0=none, >0=count
+                    int hd = tr.optInt("heads", -1);
+                    opt.heads = hd; // -1=unknown, 0=none, >0=count
                     s.trainings[i] = opt;
                 }
             }
@@ -483,45 +514,56 @@ public class DataCollector {
     // ========================================================================
 
     /**
-     * ★ v2.1: 通过 training_levels 变化检测动作
-     * training_levels 格式: [{"command_id":101,"level":3}, {"command_id":102,"level":2}, ...]
-     * 训练后等级+1的那个 command_id 就是选中的训练
-     * 映射: 101=Speed, 102=Stamina, 103=Guts, 105=Power, 106=Wiz
+     * ★ v2.1: 通过 training_levels 变化检测动作（弱辅助信号）
+     * ★ v2.3: 降级为辅助 — 设施等级不是每次训练都升级
+     * training_levels 格式: [{"command_id":101,"level":3}, ...]
+     * 只有恰好一个普通训练等级+1时才作为辅助证据
+     * 多个变化或非普通训练变化时返回 null
      */
     private String detectActionByTrainingLevels(TurnSnapshot prev, TurnSnapshot curr) {
         if (prev.trainingLevelsRaw == null || curr.trainingLevelsRaw == null) return null;
         try {
             JSONArray prevLevels = new JSONArray(prev.trainingLevelsRaw);
             JSONArray currLevels = new JSONArray(curr.trainingLevelsRaw);
-            if (prevLevels.length() != currLevels.length()) return null;
+            // ★ v2.3: 不要求长度相同，按 command_id 建 Map
 
-            // 建 command_id → level 映射
             java.util.Map<Integer, Integer> prevMap = new java.util.HashMap<>();
             java.util.Map<Integer, Integer> currMap = new java.util.HashMap<>();
             for (int i = 0; i < prevLevels.length(); i++) {
                 JSONObject pl = prevLevels.optJSONObject(i);
-                if (pl != null) prevMap.put(pl.optInt("command_id", 0), pl.optInt("level", 0));
+                if (pl != null) {
+                    int cid = pl.optInt("command_id", 0);
+                    if (cid > 0) prevMap.put(cid, pl.optInt("level", 0));
+                }
+            }
+            for (int i = 0; i < currLevels.length(); i++) {
                 JSONObject cl = currLevels.optJSONObject(i);
-                if (cl != null) currMap.put(cl.optInt("command_id", 0), cl.optInt("level", 0));
+                if (cl != null) {
+                    int cid = cl.optInt("command_id", 0);
+                    if (cid > 0) currMap.put(cid, cl.optInt("level", 0));
+                }
             }
 
-            // 找等级+1的 command_id
-            for (java.util.Map.Entry<Integer, Integer> entry : currMap.entrySet()) {
-                int cmdId = entry.getKey();
-                int currLv = entry.getValue();
+            // 找等级变化（只看普通训练 101/102/103/105/106）
+            int changedCount = 0;
+            String changedAction = null;
+            int[] validCmdIds = {101, 102, 103, 105, 106};
+            for (int cmdId : validCmdIds) {
                 int prevLv = prevMap.getOrDefault(cmdId, 0);
-                if (currLv > prevLv) {
-                    // 等级提升了
+                int currLv = currMap.getOrDefault(cmdId, 0);
+                if (currLv > prevLv && currLv - prevLv == 1) {
+                    changedCount++;
                     switch (cmdId) {
-                        case 101: return ACTION_SPEED;
-                        case 102: return ACTION_STAMINA;
-                        case 103: return ACTION_GUTS;
-                        case 105: return ACTION_POWER;
-                        case 106: return ACTION_WISDOM;
-                        default: break;
+                        case 101: changedAction = ACTION_SPEED; break;
+                        case 102: changedAction = ACTION_STAMINA; break;
+                        case 103: changedAction = ACTION_GUTS; break;
+                        case 105: changedAction = ACTION_POWER; break;
+                        case 106: changedAction = ACTION_WISDOM; break;
                     }
                 }
             }
+            // ★ v2.3: 恰好一个变化才作为辅助，多个变化返回 null
+            if (changedCount == 1) return changedAction;
         } catch (Exception e) {
             Log.w(TAG, "detectActionByTrainingLevels error: " + e.getMessage());
         }
@@ -743,11 +785,16 @@ public class DataCollector {
         try {
             JSONObject session = new JSONObject();
             session.put("session_id", sessId);
+            session.put("schema_version", 3);
+            session.put("app_version", "v2.3");
+            session.put("app_commit", BuildConfig.VERSION_NAME);
             session.put("scenario", scen != null ? scen : "Unknown");
             session.put("turn_count", turns.size());
             session.put("timestamp", System.currentTimeMillis());
+            session.put("started_at", turns.isEmpty() ? System.currentTimeMillis() : turns.get(0).capturedAt);
             session.put("is_final", isFinal);
-            session.put("app_version", "v2.0");
+            session.put("valid", true);
+            session.put("mapping_version", "v2.3_102sta_105pow");
 
             // 回合数据
             JSONArray turnsArr = new JSONArray();
@@ -926,7 +973,12 @@ public class DataCollector {
         int skillCount;
 
         String actionTaken = "Unknown";
+        String actionSource = "unknown";
+        double actionConfidence = 0.0;
+        int actionCommandId = -1;
+        int actionRawCommandId = -1;
         int storyId = 0;
+        long capturedAt = System.currentTimeMillis();
 
         JSONObject toJson() throws JSONException {
             JSONObject o = new JSONObject();
@@ -974,9 +1026,16 @@ public class DataCollector {
                 o.put("trainings", trArr);
             }
 
-            o.put("action_taken", actionTaken != null ? actionTaken : "Unknown");
             if (charaId > 0) o.put("chara_id", charaId);
             if (storyId > 0) o.put("story_id", storyId);
+
+            // ★ v2.3: 动作来源元数据
+            o.put("action_taken", actionTaken);
+            o.put("action_source", actionSource);
+            o.put("action_confidence", actionConfidence);
+            o.put("captured_at", capturedAt);
+            if (actionCommandId >= 0) o.put("action_command_id", actionCommandId);
+            if (actionRawCommandId >= 0) o.put("action_raw_command_id", actionRawCommandId);
 
             if (aiBest != null && !aiBest.isEmpty()) {
                 JSONObject ai = new JSONObject();
