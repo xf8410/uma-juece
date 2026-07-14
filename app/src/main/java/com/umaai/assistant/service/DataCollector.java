@@ -827,8 +827,10 @@ public class DataCollector {
                     while ((line = reader.readLine()) != null) sb.append(line);
                     reader.close();
                     JSONObject resp = new JSONObject(sb.toString());
-                    lastUploadedSha = resp.optString("content", new JSONObject())
-                        .optString("sha", lastUploadedSha);
+                    JSONObject content = resp.optJSONObject("content");
+                    if (content != null) {
+                        lastUploadedSha = content.optString("sha", lastUploadedSha);
+                    }
                 } catch (Exception ignored) {}
 
                 Log.d(TAG, "Upload success: " + filename + " (isFinal=" + isFinal + ")");
