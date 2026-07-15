@@ -489,8 +489,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
                 }
 
-                // ★ Buff显示 - 根据剧本分支
-                updateBuffs(buffs);
+                // ★ 每个剧本的 Buff 数据结构不同，必须按实际剧本分流。
+                updateBuffs(buffs, currentScenario);
 
                 // ★ 比赛回合检测（改进版）+ 生涯目标粉丝数
                 int fan = stats.optInt("fan", -1);
@@ -1054,33 +1054,62 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     /**
      * 更新Buff显示区域
      */
-    private void updateBuffs(JSONArray buffs) {
+    private void clearBuffViews() {
+        if (tvBuffAo != null) tvBuffAo.setText("");
+        if (tvBuffMidori != null) tvBuffMidori.setText("");
+        if (tvBuffMomo != null) tvBuffMomo.setText("");
+        if (tvBuffDetail != null) {
+            tvBuffDetail.setText("");
+            tvBuffDetail.setVisibility(View.GONE);
+        }
+    }
+
+    private void hideBuffViews() {
+        clearBuffViews();
+        if (buffContainer != null) buffContainer.setVisibility(View.GONE);
+        if (buffSeparator != null) buffSeparator.setVisibility(View.GONE);
+    }
+
+    /** Buff 展示严格按剧本分流：Dreams 才使用青/緑/桃，Ramen 只显示拉面效果。 */
+    private void updateBuffs(JSONArray buffs, String scenario) {
+        clearBuffViews();
         if (buffs == null || buffs.length() == 0) {
-            if (buffContainer != null) buffContainer.setVisibility(View.GONE);
-            if (tvBuffDetail != null) tvBuffDetail.setVisibility(View.GONE);
-            if (buffSeparator != null) buffSeparator.setVisibility(View.GONE);
+            hideBuffViews();
             return;
         }
 
-        if (buffContainer != null) buffContainer.setVisibility(View.VISIBLE);
-        if (buffSeparator != null) buffSeparator.setVisibility(View.VISIBLE);
+        final String requiredType;
+        if ("Dreams".equals(scenario)) {
+            requiredType = "Breeders";
+        } else if ("Ramen".equals(scenario)) {
+            requiredType = "Ramen";
+        } else {
+            hideBuffViews();
+            return;
+        }
 
         try {
-            boolean hasBreedersBuff = false;
-            boolean hasRamenBuff = false;
+            JSONArray scenarioBuffs = new JSONArray();
             for (int i = 0; i < buffs.length(); i++) {
-                String btype = buffs.getJSONObject(i).optString("type", "");
-                if ("Breeders".equals(btype)) hasBreedersBuff = true;
-                if ("Ramen".equals(btype)) hasRamenBuff = true;
+                JSONObject buff = buffs.optJSONObject(i);
+                if (buff != null && requiredType.equals(buff.optString("type", ""))) {
+                    scenarioBuffs.put(buff);
+                }
             }
-            if (hasBreedersBuff) {
-                updateBreedersBuffs(buffs);
-            } else if (hasRamenBuff) {
-                updateRamenBuffs(buffs);
+            if (scenarioBuffs.length() == 0) {
+                hideBuffViews();
+                return;
+            }
+
+            if (buffContainer != null) buffContainer.setVisibility(View.VISIBLE);
+            if (buffSeparator != null) buffSeparator.setVisibility(View.VISIBLE);
+            if ("Dreams".equals(scenario)) {
+                updateBreedersBuffs(scenarioBuffs);
             } else {
-                updateGenericBuffs(buffs);
+                updateRamenBuffs(scenarioBuffs);
             }
         } catch (JSONException e) {
+            hideBuffViews();
             Log.w(TAG, "Buff parse error: " + e.getMessage());
         }
     }
