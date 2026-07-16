@@ -1424,14 +1424,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private static final int[] CMD_ID_MAP = {101, 102, 105, 103, 106};
 
-    /** 返回名称最后 count 个 Unicode 字符；用于窄浮窗的支援卡短名。 */
-    private static String shortCardName(String name, int count) {
-        if (name == null || name.isEmpty() || count <= 0) return name == null ? "" : name;
-        int codePoints = name.codePointCount(0, name.length());
-        if (codePoints <= count) return name;
-        return name.substring(name.offsetByCodePoints(0, codePoints - count));
-    }
-
     private void updateStatFromSummary(TextView tvVal, TextView tvGain,
                                         JSONObject stats, JSONArray trainings,
                                         JSONObject fullJson,
@@ -1526,7 +1518,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     }
                     boolean hasResolvedName = !pName.isEmpty();
                     if (!hasResolvedName) pName = "支援卡" + supportCardId;
-                    if (hasResolvedName) pName = shortCardName(pName, 2);
+                    // uma_names.nickname 已是经中文资料整理的短名；原样显示。
                     displayType = supportCardTypeCache.getOrDefault(supportCardId, "?");
                 } else {
                     // partner_id 未证实等于 uma_names.id，不能据此编造 NPC 名称/类型。
