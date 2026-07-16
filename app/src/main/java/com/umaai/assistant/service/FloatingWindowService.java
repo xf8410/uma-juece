@@ -1214,6 +1214,20 @@ public class FloatingWindowService extends Service implements HttpDataService.On
      * 加载支援卡ID→真实角色名/类型及角色、NPC名称。
      * support_card_data.json 是完整卡库；uma_support_cards.json 仅作为新卡名称补丁。
      */
+    // 只转换 uma_support_cards.json 中此具体 support_card_id 的 type。
+    // 不读取当前训练 command_id 或伙伴位置。
+    private static String supportCardDataTypeLabel(String type) {
+        if ("Speed".equals(type)) return "速";
+        if ("Stamina".equals(type)) return "耐";
+        if ("Power".equals(type)) return "力";
+        if ("Guts".equals(type)) return "根";
+        if ("Wit".equals(type) || "Wisdom".equals(type)) return "智";
+        if ("Friend".equals(type)) return "友";
+        if ("Group".equals(type)) return "团";
+        return "";
+    }
+
+
     private void ensureNameCaches() {
         if (supportCardNameCache != null && supportCardCharaCache != null
                 && supportCardTypeCache != null && npcNameCache != null) return;
@@ -1291,11 +1305,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         if (card == null) continue;
                         int cardId = card.optInt("cardId", 0);
                         String chara = card.optString("chara", "");
+                        String patchType = supportCardDataTypeLabel(card.optString("type", ""));
                         // 补丁卡表的 chara 是日文名；不能覆盖完整卡表经
                         // chara_id → uma_names.nickname 得到的中文名称。
                         if (cardId > 0 && !chara.isEmpty()
                                 && !supportCardNameCache.containsKey(cardId)) {
                             supportCardNameCache.put(cardId, chara);
+                        }
+                        // 类型与同一具体 cardId 绑定，可覆盖完整卡表的
+                        // 通用回退值，但绝不来自当前训练。
+                        if (cardId > 0 && !patchType.isEmpty()) {
+                            supportCardTypeCache.put(cardId, patchType);
                         }
                     }
                 }
