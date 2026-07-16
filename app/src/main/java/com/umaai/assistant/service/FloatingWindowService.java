@@ -1258,9 +1258,22 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                             String name = npcNameCache.get(charaId);
                             if (name != null && !name.isEmpty()) supportCardNameCache.put(cardId, name);
                         }
-                        if (cardType == 1) supportCardTypeCache.put(cardId, "支援");
-                        else if (cardType == 2) supportCardTypeCache.put(cardId, "友人");
-                        else if (cardType == 3) supportCardTypeCache.put(cardId, "团队");
+                        // UI 卡属性共有七种：五种训练卡由 command_id 决定，
+                        // support_card_type 仅用于友人/团队，不能把普通卡统称为“支援”。
+                        String shortType = "?";
+                        if (cardType == 2) shortType = "友";
+                        else if (cardType == 3) shortType = "团";
+                        else if (cardType == 1) {
+                            switch (row.optInt("command_id", 0)) {
+                                case 101: shortType = "速"; break;
+                                case 102: shortType = "耐"; break;
+                                case 105: shortType = "力"; break;
+                                case 103: shortType = "根"; break;
+                                case 106: shortType = "智"; break;
+                                default: break; // command_id=0 等特殊卡不猜类型
+                            }
+                        }
+                        supportCardTypeCache.put(cardId, shortType);
                     }
                 }
             }
@@ -1411,6 +1424,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private static final int[] CMD_ID_MAP = {101, 102, 105, 103, 106};
 
+    /** 返回名称最后 count 个 Unicode 字符；用于窄浮窗的支援卡短名。 */
+    private static String shortCardName(String name, int count) {
+        if (name == null || name.isEmpty() || count <= 0) return name == null ? "" : name;
+        int codePoints = name.codePointCount(0, name.length());
+        if (codePoints <= count) return name;
+        return name.substring(name.offsetByCodePoints(0, codePoints - count));
+    }
+
     private void updateStatFromSummary(TextView tvVal, TextView tvGain,
                                         JSONObject stats, JSONArray trainings,
                                         JSONObject fullJson,
@@ -1503,8 +1524,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         int charaId = supportCardCharaCache.getOrDefault(supportCardId, 0);
                         if (charaId > 0) pName = npcNameCache.getOrDefault(charaId, "");
                     }
-                    if (pName.isEmpty()) pName = "支援卡" + supportCardId;
-                    displayType = supportCardTypeCache.getOrDefault(supportCardId, "支援");
+                    boolean hasResolvedName = !pName.isEmpty();
+                    if (!hasResolvedName) pName = "支援卡" + supportCardId;
+                    if (hasResolvedName) pName = shortCardName(pName, 2);
+                    displayType = supportCardTypeCache.getOrDefault(supportCardId, "?");
                 } else {
                     // partner_id 未证实等于 uma_names.id，不能据此编造 NPC 名称/类型。
                     String soName = p.optString("name", "");
