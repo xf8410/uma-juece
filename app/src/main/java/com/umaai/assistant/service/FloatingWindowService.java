@@ -1424,6 +1424,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private static final int[] CMD_ID_MAP = {101, 102, 105, 103, 106};
 
+    /** 返回名称最后 count 个 Unicode 字符；用于窄浮窗的支援卡短名。 */
+    private static String shortCardName(String name, int count) {
+        if (name == null || name.isEmpty() || count <= 0) return name == null ? "" : name;
+        int codePoints = name.codePointCount(0, name.length());
+        if (codePoints <= count) return name;
+        return name.substring(name.offsetByCodePoints(0, codePoints - count));
+    }
+
     private void updateStatFromSummary(TextView tvVal, TextView tvGain,
                                         JSONObject stats, JSONArray trainings,
                                         JSONObject fullJson,
@@ -1516,7 +1524,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         int charaId = supportCardCharaCache.getOrDefault(supportCardId, 0);
                         if (charaId > 0) pName = npcNameCache.getOrDefault(charaId, "");
                     }
-                    if (pName.isEmpty()) pName = "支援卡" + supportCardId;
+                    boolean hasResolvedName = !pName.isEmpty();
+                    if (!hasResolvedName) pName = "支援卡" + supportCardId;
+                    if (hasResolvedName) pName = shortCardName(pName, 2);
                     displayType = supportCardTypeCache.getOrDefault(supportCardId, "?");
                 } else {
                     // partner_id 未证实等于 uma_names.id，不能据此编造 NPC 名称/类型。
@@ -2290,4 +2300,280 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             teamContainer = floatingView.findViewById(R.id.team_container);
             tvTeamLabel = floatingView.findViewById(R.id.tv_team_label);
             tvTeamMembers = floatingView.findViewById(R.id.tv_team_members);
-            tvTeamRank = fl
+            tvTeamRank = floatingView.findViewById(R.id.tv_team_rank);
+            tvDreamTraining = floatingView.findViewById(R.id.tv_dream_training);
+            // 胜鞍面板
+            saddlePanel = floatingView.findViewById(R.id.saddle_panel);
+            tvSaddleContent = floatingView.findViewById(R.id.tv_saddle_content);
+            // 抓包面板
+            sniffPanel = floatingView.findViewById(R.id.sniff_panel);
+            tvSniffContent = floatingView.findViewById(R.id.tv_sniff_content);
+            // 事件推荐面板
+            evtPanel = floatingView.findViewById(R.id.evt_panel);
+            tvEvtContent = floatingView.findViewById(R.id.tv_evt_content);
+            // 比赛/目标状态栏 + 拉面杯 Gauge
+            tvRaceStatus = floatingView.findViewById(R.id.tv_race_status);
+            tvRamenGauge = floatingView.findViewById(R.id.tv_ramen_gauge);
+
+            // ★ 初始化剧本标签
+            updateScenarioLabel();
+
+            int layoutFlag;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                layoutFlag = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+            } else {
+                layoutFlag = WindowManager.LayoutParams.TYPE_PHONE;
+            }
+
+            params = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    layoutFlag,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.x = 20;
+            params.y = 100;
+
+            setupDrag();
+            windowManager.addView(floatingView, params);
+            isViewAdded = true;
+            Log.d(TAG, "Floating view added");
+
+            View btnClose = floatingView.findViewById(R.id.btn_close);
+            TextView btnLog = floatingView.findViewById(R.id.btn_debug_log);
+            if (btnLog != null) {
+                btnLog.setOnClickListener(v -> {
+                    if (debugLogSaver != null) {
+                        debugLogSaver.manualSave((success, msg) ->
+                            handler.post(() -> {
+                                if (tvHookStatus != null) {
+                                    tvHookStatus.setText("Log:" + msg);
+                                    tvHookStatus.setTextColor(success ? 0xFF00FF88 : 0xFFFF4444);
+                                }
+                            })
+                        );
+                    }
+                });
+            }
+
+            // DUMP按钮：一键抓取所有端点数据上传GitHub
+            TextView btnDump = floatingView.findViewById(R.id.btn_dump);
+            if (btnDump != null) {
+                btnDump.setOnClickListener(v -> {
+                    if (endpointDumper != null) {
+                        // ★ v3.18.8: dumping中再点=取消
+                        if (endpointDumper.isDumping()) {
+                            endpointDumper.cancel();
+                            final TextView btn = (TextView) v;
+                            btn.setText("DUMP");
+                            return;
+                        }
+                        // ★ 视觉反馈：按钮变色+改字
+                        final TextView btn = (TextView) v;
+                        final int origColor = btn.getCurrentTextColor();
+                        btn.setText("···");
+                        btn.setTextColor(0xFF00FF88);
+                        endpointDumper.dumpAll(currentScenario, new EndpointDumper.DumpCallback() {
+                            @Override
+                            public void onDumpComplete(int ok, int fail, String fails) {
+                                handler.post(() -> {
+                                    btn.setText("DUMP");
+                                    btn.setTextColor(origColor);
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+            if (btnClose != null) {
+                btnClose.setOnClickListener(v -> {
+                    Log.d(TAG, "Close button clicked");
+                    stopSelf();
+                });
+            }
+
+            // ★ 胜鞍分析按钮
+            TextView btnSaddle = floatingView.findViewById(R.id.btn_saddle);
+            if (btnSaddle != null) {
+                btnSaddle.setOnClickListener(v -> {
+                    saddlePanelVisible = !saddlePanelVisible;
+                    if (saddlePanelVisible) {
+                        saddlePanel.setVisibility(View.VISIBLE);
+                        tvSaddleContent.setText("加载中...");
+                        fetchSaddleAnalysis();
+                    } else {
+                        saddlePanel.setVisibility(View.GONE);
+                    }
+                });
+            }
+
+            // ★ 抓包按钮
+            TextView btnSniff = floatingView.findViewById(R.id.btn_sniff);
+            if (btnSniff != null) {
+                btnSniff.setOnClickListener(v -> {
+                    sniffPanelVisible = !sniffPanelVisible;
+                    if (sniffPanelVisible) {
+                        sniffPanel.setVisibility(View.VISIBLE);
+                        if (!sniffEnabled) {
+                            toggleSniff(true);
+                        }
+                        startSniffPolling();
+                    } else {
+                        sniffPanel.setVisibility(View.GONE);
+                        stopSniffPolling();
+                    }
+                });
+            }
+
+            // ★ 事件推荐按钮
+            TextView btnEvt = floatingView.findViewById(R.id.btn_evt);
+            if (btnEvt != null) {
+                btnEvt.setOnClickListener(v -> {
+                    evtPanelVisible = !evtPanelVisible;
+                    if (evtPanelVisible) {
+                        evtPanel.setVisibility(View.VISIBLE);
+                        tvEvtContent.setText("监控中...");
+                        startEvtPolling();
+                    } else {
+                        evtPanel.setVisibility(View.GONE);
+                        stopEvtPolling();
+                    }
+                });
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "createFloatingView failed: " + e.getMessage(), e);
+            handler.postDelayed(() -> {
+                try {
+                    if (!isViewAdded && floatingView != null && floatingView.getParent() == null) {
+                        windowManager.addView(floatingView, params);
+                        isViewAdded = true;
+                    }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Retry also failed: " + ex.getMessage(), ex);
+                }
+            }, 2000);
+        }
+    }
+
+    private void setupDrag() {
+        if (floatingView == null) return;
+
+        floatingView.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    initialX = params.x;
+                    initialY = params.y;
+                    initialTouchX = event.getRawX();
+                    initialTouchY = event.getRawY();
+                    isDragging = false;
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - initialTouchX;
+                    float dy = event.getRawY() - initialTouchY;
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                        isDragging = true;
+                        params.x = initialX + (int) dx;
+                        params.y = initialY + (int) dy;
+                        if (windowManager != null && floatingView != null) {
+                            windowManager.updateViewLayout(floatingView, params);
+                        }
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                    if (!isDragging) {
+                        v.performClick();
+                    }
+                    return true;
+            }
+            return false;
+        });
+    }
+
+    private void registerDataReceiver() {
+        dataReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String data = intent.getStringExtra(EXTRA_DATA);
+                handleData(data);
+            }
+        };
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                dataReceiver, new IntentFilter(ACTION_DATA));
+    }
+
+    /** 注册剧本切换广播接收器 */
+    private void registerScenarioReceiver() {
+        scenarioReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                if (ACTION_SCENARIO.equals(action)) {
+                    String scenario = intent.getStringExtra("scenario");
+                    if (scenario != null) {
+                        selectedScenario = scenario;
+                        Log.d(TAG, "Scenario changed via broadcast: " + scenario);
+                        updateScenarioLabel();
+                        updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
+                    }
+                } else if (ACTION_UPLOAD_DATA.equals(action)) {
+                    // 手动上传当前育成数据
+                    if (dataCollector != null && dataCollector.getTurnCount() > 0) {
+                        Log.d(TAG, "Manual upload requested, turns: " + dataCollector.getTurnCount());
+                        dataCollector.finalizeAndUpload();
+                        Toast.makeText(FloatingWindowService.this,
+                            dataCollector.getTurnCount() + "回合数据上传中...",
+                            Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(FloatingWindowService.this,
+                            "没有可上传的数据", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        };
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                scenarioReceiver, new IntentFilter(ACTION_SCENARIO));
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                scenarioReceiver, new IntentFilter(ACTION_UPLOAD_DATA));
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        stopFallbackPoll();
+        stopSniffPolling();
+        stopEvtPolling();
+        if (sniffEnabled) {
+            toggleSniff(false);
+        }
+        stopHttpServer();
+        if (floatingView != null && isViewAdded) {
+            try {
+                windowManager.removeView(floatingView);
+            } catch (Exception e) {
+                Log.w(TAG, "removeView failed: " + e.getMessage());
+            }
+        }
+        if (dataReceiver != null) {
+            try {
+                LocalBroadcastManager.getInstance(this).unregisterReceiver(dataReceiver);
+            } catch (Exception e) {
+                Log.w(TAG, "unregisterReceiver failed: " + e.getMessage());
+            }
+        }
+        if (scenarioReceiver != null) {
+            try {
+                LocalBroadcastManager.getInstance(this).unregisterReceiver(scenarioReceiver);
+            } catch (Exception e) {
+                Log.w(TAG, "unregister scenarioReceiver failed: " + e.getMessage());
+            }
+        }
+        handler.removeCallbacksAndMessages(null);
+    }
+}
+
