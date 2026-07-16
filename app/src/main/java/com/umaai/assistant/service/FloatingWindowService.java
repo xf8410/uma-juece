@@ -1278,7 +1278,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         if (card == null) continue;
                         int cardId = card.optInt("cardId", 0);
                         String chara = card.optString("chara", "");
-                        if (cardId > 0 && !chara.isEmpty()) supportCardNameCache.put(cardId, chara);
+                        // 补丁卡表的 chara 是日文名；不能覆盖完整卡表经
+                        // chara_id → uma_names.nickname 得到的中文名称。
+                        if (cardId > 0 && !chara.isEmpty()
+                                && !supportCardNameCache.containsKey(cardId)) {
+                            supportCardNameCache.put(cardId, chara);
+                        }
                     }
                 }
             }
