@@ -44,6 +44,8 @@ public class DataCollector {
     private static final String KEY_SCENARIO = "scenario";
     private static final String KEY_TURNS_JSON = "turns_json";
     private static final String KEY_PREV_SNAPSHOT = "prev_snapshot";
+    // 已消费的 SO training-hook 序号。必须持久化，避免 App 重启后复用旧动作。
+    private static final String KEY_LAST_CONSUMED_ACTION_SEQUENCE = "last_consumed_action_sequence";
 
     // GitHub upload config
     private static final String GITHUB_REPO = "xf8410/uma-data";
@@ -93,6 +95,7 @@ public class DataCollector {
         sessionId = prefs.getString(KEY_SESSION_ID, null);
         int savedTurnCount = prefs.getInt(KEY_TURN_COUNT, 0);
         scenario = prefs.getString(KEY_SCENARIO, null);
+        lastConsumedActionSequence = prefs.getLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, 0);
 
         if (sessionId != null && savedTurnCount > 0) {
             // ★ v2.0: 恢复 turns 和 prevSnapshot
@@ -147,6 +150,7 @@ public class DataCollector {
         ed.putString(KEY_SESSION_ID, sessionId);
         ed.putInt(KEY_TURN_COUNT, turns.size());
         ed.putString(KEY_SCENARIO, scenario);
+        ed.putLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, lastConsumedActionSequence);
 
         // 序列化 turns
         try {
@@ -193,6 +197,8 @@ public class DataCollector {
     // ★ v2.3: 去重 — 同一 turn 的相同快照不重复处理
     private int lastProcessedTurn = -1;
     private String lastSnapshotHash = "";
+    // last_action 是 SO 的“最近一次训练 hook”缓存；只可消费一次。
+    private long lastConsumedActionSequence = 0;
 
     public synchronized String onSummaryData(JSONObject json) {
         // ★ v2.0: 防御 — 检查是否是 error JSON
@@ -265,6 +271,16 @@ public class DataCollector {
 
             // ★ v2.0: finalizeAndUpload 可能已经 startNewSession，此时 prevSnapshot 已清
             if (prevSnapshot == null) {
+                // 建立本局基线时丢弃 SO 已存在的最近训练动作。该动作可能属于
+                // App 启动前或上一局；没有前后快照不能安全归属，宁可走 Unknown。
+                JSONObject baselineAction = json.optJSONObject("last_action");
+                if (baselineAction != null) {
+                    long baselineSeq = baselineAction.optLong("sequence", 0);
+                    if (baselineSeq > lastConsumedActionSequence) {
+                        lastConsumedActionSequence = baselineSeq;
+                        Log.d(TAG, "Baseline consumed training_hook seq=" + baselineSeq);
+                    }
+                }
                 prevSnapshot = snapshot;
                 if (snapshot.scenario != null && !snapshot.scenario.isEmpty()) {
                     scenario = snapshot.scenario;
@@ -288,26 +304,23 @@ public class DataCollector {
                     String soAction = lastAction.optString("action", "");
                     int soCmdId = lastAction.optInt("raw_command_id", -1);
                     int soNormId = lastAction.optInt("normalized_command_id", -1);
-                    int soSeq = lastAction.optInt("sequence", 0);
-                    if (!soAction.isEmpty() && !"None".equals(soAction) && soCmdId >= 0) {
-                        detectedAction = soAction;
-                        Log.d(TAG, "Turn " + prevSnapshot.turn + " → " + snapshot.turn
-                            + " action: " + detectedAction + " (source=training_hook, seq=" + soSeq
-                            + ", cmd_id=" + soCmdId + ")");
-                        prevSnapshot.actionTaken = detectedAction;
-                        prevSnapshot.actionSource = "training_hook";
-                        prevSnapshot.actionConfidence = 1.0;
-                        prevSnapshot.actionCommandId = soNormId;
-                        prevSnapshot.actionRawCommandId = soCmdId;
-                        turns.add(prevSnapshot);
-                        uploadCurrentSession(false);
-                        // 更新scenario
-                        if (snapshot.scenario != null && !snapshot.scenario.isEmpty()) {
-                            scenario = snapshot.scenario;
-                        }
-                        prevSnapshot = snapshot;
-                        persistState();
-                        return detectedAction;
+                    long soSeq = lastAction.optLong("sequence", 0);
+                    // last_action 是“最近一次训练 hook”缓存，且 sub_id 尚未证实等于
+                    // CommandId。因此 sequence 只能用于去重，不能作为训练动作的真值。
+                    if (soSeq > lastConsumedActionSequence) {
+                        lastConsumedActionSequence = soSeq;
+                        Log.d(TAG, "Consumed fresh unverified training_hook seq=" + soSeq
+                                + " for turn " + prevSnapshot.turn + " → " + snapshot.turn
+                                + "; falling back to inference (raw sub_id=" + soCmdId + ")");
+                    } else if (soSeq > 0 && soSeq < lastConsumedActionSequence) {
+                        // SO/插件重启后 sequence 会从较小值重新开始。丢弃这条无法安全
+                        // 归属的记录，并重置水位；下一条递增记录才允许作为“新鲜”观察值。
+                        lastConsumedActionSequence = soSeq;
+                        Log.w(TAG, "training_hook sequence reset to " + soSeq
+                                + "; dropped current unverified action");
+                    } else if (soSeq > 0) {
+                        Log.d(TAG, "Ignoring consumed training_hook action seq=" + soSeq
+                                + " for turn " + prevSnapshot.turn + " → " + snapshot.turn);
                     }
                 }
 
