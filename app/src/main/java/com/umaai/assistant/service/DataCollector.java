@@ -65,6 +65,7 @@ public class DataCollector {
     private static final String KEY_PREV_SNAPSHOT = "prev_snapshot";
     // 已消费的 SO training-hook 序号。必须持久化，避免 App 重启后复用旧动作。
     private static final String KEY_LAST_CONSUMED_ACTION_SEQUENCE = "last_consumed_action_sequence";
+    private static final String KEY_LAST_CONSUMED_RNG_SEQUENCE = "last_consumed_rng_sequence";
 
     // GitHub upload config
     private static final String GITHUB_REPO = "xf8410/uma-data";
@@ -120,6 +121,7 @@ public class DataCollector {
         int savedTurnCount = prefs.getInt(KEY_TURN_COUNT, 0);
         scenario = prefs.getString(KEY_SCENARIO, null);
         lastConsumedActionSequence = prefs.getLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, 0);
+        lastConsumedRngSequence = prefs.getLong(KEY_LAST_CONSUMED_RNG_SEQUENCE, 0);
 
         // ★ v2.4: 优先从状态文件恢复（完整字段）；文件不存在时回退旧 SharedPreferences
         // 整局 JSON（字段残缺，仅用于一次性迁移），迁移后下次 persistState 会写状态文件。
@@ -132,6 +134,7 @@ public class DataCollector {
                 scenario = st.optString("scenario", scenario);
                 lastConsumedActionSequence = st.optLong("last_consumed_action_sequence",
                         lastConsumedActionSequence);
+                lastConsumedRngSequence = st.optLong("last_consumed_rng_sequence", lastConsumedRngSequence);
                 JSONArray arr = st.optJSONArray("turns");
                 if (arr != null) {
                     for (int i = 0; i < arr.length(); i++) {
@@ -207,6 +210,7 @@ public class DataCollector {
             .putInt(KEY_TURN_COUNT, turns.size())
             .putString(KEY_SCENARIO, scenario)
             .putLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, lastConsumedActionSequence)
+            .putLong(KEY_LAST_CONSUMED_RNG_SEQUENCE, lastConsumedRngSequence)
             .apply();
 
         // 整局 JSON 写状态文件：先写临时文件再 rename，崩溃也不会留下半截文件
@@ -215,6 +219,7 @@ public class DataCollector {
             st.put("session_id", sessionId);
             st.put("scenario", scenario);
             st.put("last_consumed_action_sequence", lastConsumedActionSequence);
+            st.put("last_consumed_rng_sequence", lastConsumedRngSequence);
             JSONArray arr = new JSONArray();
             for (TurnSnapshot t : turns) {
                 arr.put(t.toJson());
@@ -295,6 +300,7 @@ public class DataCollector {
     private String lastSnapshotHash = "";
     // last_action 是 SO 的“最近一次训练 hook”缓存；只可消费一次。
     private long lastConsumedActionSequence = 0;
+    private long lastConsumedRngSequence = 0;
 
     public synchronized String onSummaryData(JSONObject json) {
         // ★ v2.0: 防御 — 检查是否是 error JSON
@@ -377,6 +383,12 @@ public class DataCollector {
                         Log.d(TAG, "Baseline consumed training_hook seq=" + baselineSeq);
                     }
                 }
+                // A latest transition present on the baseline cannot be associated without a
+                // pre/post App snapshot. Consume its sequence so it cannot leak across sessions.
+                if (snapshot.rngSequence > 0) {
+                    lastConsumedRngSequence = snapshot.rngSequence;
+                    Log.d(TAG, "Baseline consumed RNG transition seq=" + snapshot.rngSequence);
+                }
                 prevSnapshot = snapshot;
                 if (snapshot.scenario != null && !snapshot.scenario.isEmpty()) {
                     scenario = snapshot.scenario;
@@ -425,7 +437,45 @@ public class DataCollector {
                 Log.d(TAG, "Turn " + prevSnapshot.turn + " → " + snapshot.turn
                     + " action: " + detectedAction + " (source=inference)");
 
-                // 记录上一回合的行动
+                // Associate one fresh hook transition with the completed turn. sequence is the
+                // correlation/dedup key; raw_sub_id remains an unverified raw observation.
+                if (snapshot.rngTransitionRaw != null && snapshot.rngSequence > 0) {
+                    if (snapshot.rngSequence > lastConsumedRngSequence) {
+                        try {
+                            JSONObject transition = new JSONObject(snapshot.rngTransitionRaw);
+                            transition.put("session_id", sessionId);
+                            transition.put("associated_turn", prevSnapshot.turn);
+                            transition.put("observed_next_turn", snapshot.turn);
+                            transition.put("action", detectedAction);
+                            transition.put("action_source", "stat_delta_inference");
+                            JSONObject actualDelta = new JSONObject();
+                            actualDelta.put("speed", snapshot.speed - prevSnapshot.speed);
+                            actualDelta.put("stamina", snapshot.stamina - prevSnapshot.stamina);
+                            actualDelta.put("power", snapshot.power - prevSnapshot.power);
+                            actualDelta.put("guts", snapshot.guts - prevSnapshot.guts);
+                            actualDelta.put("wisdom", snapshot.wisdom - prevSnapshot.wisdom);
+                            actualDelta.put("skill_pt", snapshot.skillPt - prevSnapshot.skillPt);
+                            actualDelta.put("vital", snapshot.vital - prevSnapshot.vital);
+                            actualDelta.put("motivation", snapshot.motivation - prevSnapshot.motivation);
+                            transition.put("actual_delta", actualDelta);
+                            prevSnapshot.rngTransitionRaw = transition.toString();
+                            prevSnapshot.rngSequence = snapshot.rngSequence;
+                            lastConsumedRngSequence = snapshot.rngSequence;
+                        } catch (JSONException e) {
+                            Log.w(TAG, "RNG transition association failed: " + e.getMessage());
+                        }
+                    } else if (snapshot.rngSequence < lastConsumedRngSequence) {
+                        // SO restarted and its sequence counter reset. Drop this unassignable first
+                        // transition, move the watermark, then accept later increasing sequences.
+                        lastConsumedRngSequence = snapshot.rngSequence;
+                        Log.w(TAG, "RNG transition sequence reset to " + snapshot.rngSequence
+                                + "; dropped current transition");
+                    } else {
+                        Log.d(TAG, "Ignoring duplicate RNG transition seq=" + snapshot.rngSequence);
+                    }
+                }
+
+                // The pre-action snapshot's rng_state is the state paired with this decision.
                 prevSnapshot.actionTaken = detectedAction;
                 prevSnapshot.actionSource = "stat_delta_inference";
                 prevSnapshot.actionConfidence = 0.4;
@@ -532,6 +582,15 @@ public class DataCollector {
                 case "Bad":   s.motivation = 2; break;
                 case "Worst": s.motivation = 1; break;
                 default:      s.motivation = 3; break;
+            }
+
+            // RNG state/transition are additive schema fields. Keep the complete objects verbatim.
+            JSONObject rngState = json.optJSONObject("rng_state");
+            if (rngState != null) s.rngStateRaw = rngState.toString();
+            JSONObject rngTransition = json.optJSONObject("rng_transition");
+            if (rngTransition != null) {
+                s.rngTransitionRaw = rngTransition.toString();
+                s.rngSequence = rngTransition.optLong("sequence", 0);
             }
 
             // 训练选项
@@ -1296,6 +1355,9 @@ public class DataCollector {
         int aiScore;
         int skillEval;
         int skillCount;
+        String rngStateRaw;
+        String rngTransitionRaw;
+        long rngSequence;
 
         String actionTaken = "Unknown";
         String actionSource = "unknown";
@@ -1327,6 +1389,13 @@ public class DataCollector {
             stats.put("fan", fan);
             stats.put("has_bad_condition", hasBadCondition);
             o.put("stats", stats);
+
+            if (rngStateRaw != null && !rngStateRaw.isEmpty()) {
+                o.put("rng_state", new JSONObject(rngStateRaw));
+            }
+            if (rngTransitionRaw != null && !rngTransitionRaw.isEmpty()) {
+                o.put("rng_transition", new JSONObject(rngTransitionRaw));
+            }
 
             if (trainings != null) {
                 JSONArray trArr = new JSONArray();
@@ -1424,6 +1493,14 @@ public class DataCollector {
                 s.motivation = stats.optInt("motivation", 3);
                 s.fan = stats.optInt("fan", 0);
                 s.hasBadCondition = stats.optBoolean("has_bad_condition", false);
+            }
+
+            JSONObject rngState = o.optJSONObject("rng_state");
+            if (rngState != null) s.rngStateRaw = rngState.toString();
+            JSONObject rngTransition = o.optJSONObject("rng_transition");
+            if (rngTransition != null) {
+                s.rngTransitionRaw = rngTransition.toString();
+                s.rngSequence = rngTransition.optLong("sequence", 0);
             }
 
             // 动作元数据

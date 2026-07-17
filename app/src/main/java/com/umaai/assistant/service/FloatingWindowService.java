@@ -387,16 +387,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 int pt = stats.getInt("skill_point");
                 tvTotal.setText("総" + total + " Pt" + pt);
 
-                // ★ v3.24.17: 显示 RNG 种子
-                int rngSeed = json.optInt("rng_seed", 0);
-                if (rngSeed != 0 && tvTurn != null) {
-                    String turnText = tvTurn.getText().toString();
-                    // 在 turn 行追加种子信息
-                    if (!turnText.contains("Seed:")) {
-                        tvTurn.setText(turnText + "  Seed:" + rngSeed);
-                    }
-                }
-
                 // 体力
                 int vital = stats.getInt("vital");
                 int maxVital = stats.getInt("max_vital");
