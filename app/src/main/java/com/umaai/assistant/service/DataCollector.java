@@ -383,12 +383,6 @@ public class DataCollector {
                         Log.d(TAG, "Baseline consumed training_hook seq=" + baselineSeq);
                     }
                 }
-                // A latest transition present on the baseline cannot be associated without a
-                // pre/post App snapshot. Consume its sequence so it cannot leak across sessions.
-                if (snapshot.rngSequence > 0) {
-                    lastConsumedRngSequence = snapshot.rngSequence;
-                    Log.d(TAG, "Baseline consumed RNG transition seq=" + snapshot.rngSequence);
-                }
                 prevSnapshot = snapshot;
                 if (snapshot.scenario != null && !snapshot.scenario.isEmpty()) {
                     scenario = snapshot.scenario;
@@ -437,45 +431,7 @@ public class DataCollector {
                 Log.d(TAG, "Turn " + prevSnapshot.turn + " → " + snapshot.turn
                     + " action: " + detectedAction + " (source=inference)");
 
-                // Associate one fresh hook transition with the completed turn. sequence is the
-                // correlation/dedup key; raw_sub_id remains an unverified raw observation.
-                if (snapshot.rngTransitionRaw != null && snapshot.rngSequence > 0) {
-                    if (snapshot.rngSequence > lastConsumedRngSequence) {
-                        try {
-                            JSONObject transition = new JSONObject(snapshot.rngTransitionRaw);
-                            transition.put("session_id", sessionId);
-                            transition.put("associated_turn", prevSnapshot.turn);
-                            transition.put("observed_next_turn", snapshot.turn);
-                            transition.put("action", detectedAction);
-                            transition.put("action_source", "stat_delta_inference");
-                            JSONObject actualDelta = new JSONObject();
-                            actualDelta.put("speed", snapshot.speed - prevSnapshot.speed);
-                            actualDelta.put("stamina", snapshot.stamina - prevSnapshot.stamina);
-                            actualDelta.put("power", snapshot.power - prevSnapshot.power);
-                            actualDelta.put("guts", snapshot.guts - prevSnapshot.guts);
-                            actualDelta.put("wisdom", snapshot.wisdom - prevSnapshot.wisdom);
-                            actualDelta.put("skill_pt", snapshot.skillPt - prevSnapshot.skillPt);
-                            actualDelta.put("vital", snapshot.vital - prevSnapshot.vital);
-                            actualDelta.put("motivation", snapshot.motivation - prevSnapshot.motivation);
-                            transition.put("actual_delta", actualDelta);
-                            prevSnapshot.rngTransitionRaw = transition.toString();
-                            prevSnapshot.rngSequence = snapshot.rngSequence;
-                            lastConsumedRngSequence = snapshot.rngSequence;
-                        } catch (JSONException e) {
-                            Log.w(TAG, "RNG transition association failed: " + e.getMessage());
-                        }
-                    } else if (snapshot.rngSequence < lastConsumedRngSequence) {
-                        // SO restarted and its sequence counter reset. Drop this unassignable first
-                        // transition, move the watermark, then accept later increasing sequences.
-                        lastConsumedRngSequence = snapshot.rngSequence;
-                        Log.w(TAG, "RNG transition sequence reset to " + snapshot.rngSequence
-                                + "; dropped current transition");
-                    } else {
-                        Log.d(TAG, "Ignoring duplicate RNG transition seq=" + snapshot.rngSequence);
-                    }
-                }
 
-                // The pre-action snapshot's rng_state is the state paired with this decision.
                 prevSnapshot.actionTaken = detectedAction;
                 prevSnapshot.actionSource = "stat_delta_inference";
                 prevSnapshot.actionConfidence = 0.4;
@@ -584,14 +540,6 @@ public class DataCollector {
                 default:      s.motivation = 3; break;
             }
 
-            // RNG state/transition are additive schema fields. Keep the complete objects verbatim.
-            JSONObject rngState = json.optJSONObject("rng_state");
-            if (rngState != null) s.rngStateRaw = rngState.toString();
-            JSONObject rngTransition = json.optJSONObject("rng_transition");
-            if (rngTransition != null) {
-                s.rngTransitionRaw = rngTransition.toString();
-                s.rngSequence = rngTransition.optLong("sequence", 0);
-            }
 
             // 训练选项
             JSONArray trainings = json.optJSONArray("trainings");
@@ -1088,6 +1036,8 @@ public class DataCollector {
             JSONObject session = new JSONObject();
             session.put("session_id", sessId);
             session.put("schema_version", 3);
+            session.put("rng_observation_valid", false);
+            session.put("rng_invalid_reason", "offset_0x198_is_ObscuredInt_not_u32x4");
             session.put("app_version", "v2.4");
             session.put("app_commit", BuildConfig.VERSION_NAME);
             session.put("scenario", scen != null ? scen : "Unknown");
@@ -1389,13 +1339,8 @@ public class DataCollector {
             stats.put("fan", fan);
             stats.put("has_bad_condition", hasBadCondition);
             o.put("stats", stats);
-
-            if (rngStateRaw != null && !rngStateRaw.isEmpty()) {
-                o.put("rng_state", new JSONObject(rngStateRaw));
-            }
-            if (rngTransitionRaw != null && !rngTransitionRaw.isEmpty()) {
-                o.put("rng_transition", new JSONObject(rngTransitionRaw));
-            }
+            o.put("rng_observation_valid", false);
+            o.put("rng_invalid_reason", "offset_0x198_is_ObscuredInt_not_u32x4");
 
             if (trainings != null) {
                 JSONArray trArr = new JSONArray();
