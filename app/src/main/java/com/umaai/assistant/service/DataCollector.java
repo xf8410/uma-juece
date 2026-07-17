@@ -11,6 +11,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -18,21 +21,37 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 赛马娘育成数据收集器 v2.0
+ * 赛马娘育成数据收集器
+ *
+ * v2.4 修复清单（2026-07-17）：
+ *   1. 换局不再由异步上传结果驱动：finalizeAndUpload 同步「冻结→startNewSession→
+ *      入持久化队列」，网络线程永远不触碰当前 session（修跨局混合/数据丢失）
+ *   2. startNewSession 改为 synchronized，消除网络线程 turns.clear() 并发
+ *   3. 上传队列持久化到 filesDir/pending_uploads/（原子写），单 worker 线程循环，
+ *      失败退避重试；final 上传失败不再丢整局；App 重启自动续传
+ *   4. 整局状态持久化从 SharedPreferences 改为状态文件（原子写），
+ *      SharedPreferences 只存小状态，修写放大/XML 损坏风险
+ *   5. TurnSnapshot.fromJson 恢复全部字段（trainings/action_source/confidence/
+ *      captured_at/scenario/支援卡等），重启后不再用残缺数据覆盖完整上传
+ *   6. turn < prevTurn 显式分支 + 告警，不再静默接受回合回退
  *
  * v2.0 修复清单（2026-07-14）：
  *   1. parseSnapshot 对 /summary error JSON 做防御，不再抛异常
  *   2. detectAction 在 gains 全0时不再跳过，改用 command_id 直接映射
- *   3. 上传改为单线程串行队列，不再每回合开新线程
+ *   3. 上传改为单线程串行队列，不再每回合开新线程（v2.4 起改为持久队列+单worker）
  *   4. 上传时冻结 session 快照，不再读取可变的 sessionId/scenario/turns
- *   5. startNewSession 不再被 finalizeAndUpload 间接重复调用
- *   6. 恢复时持久化 turns/prevSnapshot/scenario 的 JSON 序列化
+ *   5. startNewSession 不再被 finalizeAndUpload 间接重复调用（v2.4 起改同步切局）
+ *   6. 恢复时持久化 turns/prevSnapshot/scenario 的 JSON 序列化（v2.4 起改状态文件）
  *   7. 文件名使用 session_id，与内部 session_id 保持一致
- *   8. shining/heads 的 -1/null/0 统一为 0 语义
+ *   8. shining/heads 保留 -1 未知语义（v2.3 起），不洗成 0
  *   9. 对 summary 错误、回合跳跃和数据断档做显式标记
  */
 public class DataCollector {
@@ -69,12 +88,15 @@ public class DataCollector {
     private String scenario;
     private List<TurnSnapshot> turns = new ArrayList<>();
     private TurnSnapshot prevSnapshot = null;
-    private boolean isFinalizing = false; // ★ v2.0: 防重复 startNewSession
 
-    // ★ v2.0: 单线程上传队列
-    private final Object uploadLock = new Object();
-    private AtomicBoolean uploadInProgress = new AtomicBoolean(false);
+    // ★ v2.4: 持久化上传队列 — 待上传文件先落盘，单 worker 线程消费，
+    //         网络结果只决定文件删不删，永远不改当前 session 状态
+    private final LinkedBlockingQueue<String> uploadQueue = new LinkedBlockingQueue<>();
+    private final Set<String> queuedUploads = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean uploadWorkerRunning = new AtomicBoolean(false);
+    private volatile Thread uploadWorker = null;
     private String lastUploadedSha = null; // 缓存上次 GET 的 SHA，避免每次都 GET
+    private String lastUploadedPath = null; // SHA 缓存按远端路径 keyed，跨文件不复用
 
     // 上传回调
     public interface UploadCallback {
@@ -84,6 +106,8 @@ public class DataCollector {
     public DataCollector(Context context) {
         this.context = context;
         restoreSession();
+        // ★ v2.4: App 重启后续传上次未完成的 pending 上传
+        enqueuePendingFromDisk();
     }
 
     // ========================================================================
@@ -97,8 +121,37 @@ public class DataCollector {
         scenario = prefs.getString(KEY_SCENARIO, null);
         lastConsumedActionSequence = prefs.getLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, 0);
 
-        if (sessionId != null && savedTurnCount > 0) {
-            // ★ v2.0: 恢复 turns 和 prevSnapshot
+        // ★ v2.4: 优先从状态文件恢复（完整字段）；文件不存在时回退旧 SharedPreferences
+        // 整局 JSON（字段残缺，仅用于一次性迁移），迁移后下次 persistState 会写状态文件。
+        String stateJson = readFileQuietly(getStateFile());
+        boolean restoredFromFile = false;
+        if (stateJson != null && !stateJson.isEmpty()) {
+            try {
+                JSONObject st = new JSONObject(stateJson);
+                sessionId = st.optString("session_id", sessionId);
+                scenario = st.optString("scenario", scenario);
+                lastConsumedActionSequence = st.optLong("last_consumed_action_sequence",
+                        lastConsumedActionSequence);
+                JSONArray arr = st.optJSONArray("turns");
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        turns.add(TurnSnapshot.fromJson(arr.getJSONObject(i)));
+                    }
+                }
+                JSONObject prev = st.optJSONObject("prev_snapshot");
+                if (prev != null) prevSnapshot = TurnSnapshot.fromJson(prev);
+                restoredFromFile = true;
+                Log.d(TAG, "Restored session from state file: " + sessionId
+                    + " turns: " + turns.size());
+            } catch (JSONException e) {
+                Log.e(TAG, "Restore state file failed: " + e.getMessage());
+                turns.clear();
+                prevSnapshot = null;
+            }
+        }
+
+        if (!restoredFromFile && sessionId != null && savedTurnCount > 0) {
+            // 旧路径：SharedPreferences 整局 JSON（fromJson 现在能恢复全部字段）
             String turnsJson = prefs.getString(KEY_TURNS_JSON, null);
             if (turnsJson != null) {
                 try {
@@ -106,7 +159,7 @@ public class DataCollector {
                     for (int i = 0; i < arr.length(); i++) {
                         turns.add(TurnSnapshot.fromJson(arr.getJSONObject(i)));
                     }
-                    Log.d(TAG, "Restored " + turns.size() + " turns from persistence");
+                    Log.d(TAG, "Migrated " + turns.size() + " turns from SharedPreferences");
                 } catch (JSONException e) {
                     Log.e(TAG, "Restore turns failed: " + e.getMessage());
                 }
@@ -119,62 +172,105 @@ public class DataCollector {
                     Log.e(TAG, "Restore prevSnapshot failed: " + e.getMessage());
                 }
             }
+            // 迁移完成后清掉旧的大字段，SharedPreferences 只留小状态
+            prefs.edit().remove(KEY_TURNS_JSON).remove(KEY_PREV_SNAPSHOT).apply();
+        }
+
+        if (sessionId == null) {
+            startNewSession();
+        } else {
             Log.d(TAG, "Restored session: " + sessionId + " turns: " + turns.size()
                 + " scenario: " + scenario);
-        } else {
-            startNewSession();
         }
     }
 
-    /** 开始新育成局 */
-    public void startNewSession() {
-        // ★ v2.0: 防止 finalizeAndUpload → startNewSession → 又触发 finalizeAndUpload
-        if (isFinalizing) {
-            Log.d(TAG, "skip startNewSession: finalizing in progress");
-            return;
-        }
+    /** 开始新育成局（synchronized：可能被 UI/网络以外线程调用） */
+    public synchronized void startNewSession() {
+        startNewSessionLocked();
+        persistState();
+    }
+
+    /** 调用方必须已持有 this 锁 */
+    private void startNewSessionLocked() {
         sessionId = UUID.randomUUID().toString().substring(0, 8);
         scenario = null;
         turns.clear();
         prevSnapshot = null;
-        lastUploadedSha = null;
         Log.d(TAG, "New session: " + sessionId);
-
-        persistState();
     }
 
-    /** ★ v2.0: 持久化完整状态 */
+    /** ★ v2.4: 持久化状态 — 小状态进 SharedPreferences，整局 JSON 写状态文件（原子写） */
     private void persistState() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor ed = prefs.edit();
-        ed.putString(KEY_SESSION_ID, sessionId);
-        ed.putInt(KEY_TURN_COUNT, turns.size());
-        ed.putString(KEY_SCENARIO, scenario);
-        ed.putLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, lastConsumedActionSequence);
+        prefs.edit()
+            .putString(KEY_SESSION_ID, sessionId)
+            .putInt(KEY_TURN_COUNT, turns.size())
+            .putString(KEY_SCENARIO, scenario)
+            .putLong(KEY_LAST_CONSUMED_ACTION_SEQUENCE, lastConsumedActionSequence)
+            .apply();
 
-        // 序列化 turns
+        // 整局 JSON 写状态文件：先写临时文件再 rename，崩溃也不会留下半截文件
         try {
+            JSONObject st = new JSONObject();
+            st.put("session_id", sessionId);
+            st.put("scenario", scenario);
+            st.put("last_consumed_action_sequence", lastConsumedActionSequence);
             JSONArray arr = new JSONArray();
             for (TurnSnapshot t : turns) {
                 arr.put(t.toJson());
             }
-            ed.putString(KEY_TURNS_JSON, arr.toString());
-        } catch (Exception e) {
-            Log.e(TAG, "Persist turns failed: " + e.getMessage());
-        }
-
-        // 序列化 prevSnapshot
-        if (prevSnapshot != null) {
-            try {
-                ed.putString(KEY_PREV_SNAPSHOT, prevSnapshot.toJson().toString());
-            } catch (Exception e) {
-                Log.e(TAG, "Persist prevSnapshot failed: " + e.getMessage());
+            st.put("turns", arr);
+            if (prevSnapshot != null) {
+                st.put("prev_snapshot", prevSnapshot.toJson());
             }
-        } else {
-            ed.remove(KEY_PREV_SNAPSHOT);
+            File tmp = new File(getStateFile().getAbsolutePath() + ".tmp");
+            writeFile(tmp, st.toString());
+            if (!tmp.renameTo(getStateFile())) {
+                Log.w(TAG, "persistState rename failed");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Persist state failed: " + e.getMessage());
         }
+    }
 
-        ed.apply();
+    private File getStateFile() {
+        return new File(context.getFilesDir(), "uma_collector_state.json");
+    }
+
+    private File getPendingDir() {
+        return new File(context.getFilesDir(), "pending_uploads");
+    }
+
+    private static void writeFile(File f, String content) throws Exception {
+        File parent = f.getParentFile();
+        if (parent != null) parent.mkdirs();
+        FileOutputStream fos = new FileOutputStream(f);
+        try {
+            fos.write(content.getBytes(StandardCharsets.UTF_8));
+            fos.getFD().sync();
+        } finally {
+            fos.close();
+        }
+    }
+
+    private static String readFileQuietly(File f) {
+        if (f == null || !f.exists()) return null;
+        try {
+            FileInputStream fis = new FileInputStream(f);
+            try {
+                StringBuilder sb = new StringBuilder();
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(fis, StandardCharsets.UTF_8));
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                return sb.toString();
+            } finally {
+                fis.close();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Read file failed: " + f.getName() + " — " + e.getMessage());
+            return null;
+        }
     }
 
     /** 获取当前session的回合数 */
@@ -263,13 +359,13 @@ public class DataCollector {
             }
 
             if (isNewSession) {
-                if (!isFinalizing) {
-                    Log.d(TAG, "Session " + sessionId + " ended (new session detected), uploading...");
-                    finalizeAndUpload();
-                }
+                // ★ v2.4: finalizeAndUpload 同步完成「冻结旧局→startNewSession→入队」，
+                // 返回时 prevSnapshot 已为 null，下面的基线分支接管新局第一帧。
+                Log.d(TAG, "Session " + sessionId + " ended (new session detected), finalizing...");
+                finalizeAndUpload();
             }
 
-            // ★ v2.0: finalizeAndUpload 可能已经 startNewSession，此时 prevSnapshot 已清
+            // 新局/App 重启后的第一帧：建立基线，丢弃 SO 缓存的旧训练动作
             if (prevSnapshot == null) {
                 // 建立本局基线时丢弃 SO 已存在的最近训练动作。该动作可能属于
                 // App 启动前或上一局；没有前后快照不能安全归属，宁可走 Unknown。
@@ -335,11 +431,15 @@ public class DataCollector {
                 prevSnapshot.actionConfidence = 0.4;
                 turns.add(prevSnapshot);
 
-                // ★ v2.0: 串行上传（不再每回合开新线程）
-                uploadCurrentSession(false);
+                // ★ v2.4: checkpoint 入持久化上传队列（先落盘再排队，崩溃不丢）
+                checkpointUploadLocked();
             } else if (snapshot.turn == prevSnapshot.turn) {
                 // 同回合内的数据更新
                 snapshot.actionTaken = prevSnapshot.actionTaken;
+            } else {
+                // ★ v2.4: 回合回退（SO读取抖动等）— 不记录、不伪造，显式告警并更新基准
+                Log.w(TAG, "Turn regression: " + prevSnapshot.turn + " → " + snapshot.turn
+                    + " — updating baseline only (not recorded)");
             }
 
             // 更新scenario
@@ -734,79 +834,193 @@ public class DataCollector {
     // ========================================================================
 
     /**
-     * 育成结束，汇总并上传数据
+     * 育成结束：同步「冻结旧局 → 开新局 → 旧局入持久化上传队列」。
+     * 网络结果永远不触碰当前 session（v2.4 修复跨局混合/数据丢失）。
+     * @return 本次 finalize 的回合数（0 = 没有数据）
      */
-    public void finalizeAndUpload() {
-        if (isFinalizing) {
-            Log.d(TAG, "finalizeAndUpload already in progress, skipping");
-            return;
+    public synchronized int finalizeAndUpload() {
+        if (turns.isEmpty() && prevSnapshot == null) {
+            Log.d(TAG, "No turns to upload");
+            return 0;
         }
-        isFinalizing = true;
 
+        // 把最后一回合也加进去
+        if (prevSnapshot != null && !turns.contains(prevSnapshot)) {
+            prevSnapshot.actionTaken = ACTION_UNKNOWN;
+            turns.add(prevSnapshot);
+        }
+
+        // 1. 冻结（持锁内读取 live turns 是安全的；返回的字符串与可变状态脱钩）
+        String payload;
+        int finalizedTurns;
+        String finalizedId = sessionId;
         try {
-            if (turns.isEmpty() && prevSnapshot == null) {
-                Log.d(TAG, "No turns to upload");
-                startNewSession();
-                return;
-            }
-
-            // 把最后一回合也加进去
-            if (prevSnapshot != null && !turns.contains(prevSnapshot)) {
-                prevSnapshot.actionTaken = ACTION_UNKNOWN;
-                turns.add(prevSnapshot);
-            }
-
-            uploadCurrentSession(true);
-        } finally {
-            isFinalizing = false;
+            JSONObject sessionData = buildSessionJson(true, sessionId, scenario, null);
+            if (sessionData == null) return 0;
+            payload = sessionData.toString();
+            finalizedTurns = turns.size();
+        } catch (Exception e) {
+            Log.e(TAG, "Freeze final snapshot failed: " + e.getMessage());
+            return 0;
         }
+
+        // 2. 同步开新局 — 此后所有新 summary 都归属新 session
+        startNewSessionLocked();
+        persistState();
+
+        // 3. 旧局落盘 + 入队（失败会退避重试，App 重启也会续传）
+        enqueueUpload(finalizedId, payload);
+        Log.d(TAG, "Session " + finalizedId + " finalized (" + finalizedTurns
+            + " turns), queued for upload; new session: " + sessionId);
+        return finalizedTurns;
     }
 
     /**
-     * ★ v2.0: 串行上传（不再每回合开新线程）
+     * ★ v2.4: 每回合 checkpoint — 冻结当前 session 并入持久化队列。
+     * 文件名固定为 sessionId.json，新的 checkpoint 覆盖旧的，队列自然去重。
+     * 调用方必须已持有 this 锁（onSummaryData 是 synchronized）。
      */
-    private void uploadCurrentSession(boolean isFinal) {
-        // ★ v2.0: 冻结快照 — 在线程启动前拷贝所有可变状态
-        final String frozenSessionId = sessionId;
-        final String frozenScenario = scenario;
-        final String frozenTurnsJson;
-        final int frozenTurnCount;
-        final TurnSnapshot frozenPrev = prevSnapshot;
-        final boolean frozenIsFinal = isFinal;
-
+    private void checkpointUploadLocked() {
         try {
-            JSONObject sessionData = buildSessionJson(isFinal, frozenSessionId, frozenScenario, frozenPrev);
+            JSONObject sessionData = buildSessionJson(false, sessionId, scenario, prevSnapshot);
             if (sessionData == null) return;
-            frozenTurnsJson = sessionData.toString();
-            frozenTurnCount = turns.size();
+            enqueueUpload(sessionId, sessionData.toString());
         } catch (Exception e) {
-            Log.e(TAG, "Freeze snapshot failed: " + e.getMessage());
+            Log.e(TAG, "Checkpoint freeze failed: " + e.getMessage());
+        }
+    }
+
+    // ========================================================================
+    // ★ v2.4: 持久化上传队列 — payload 先原子落盘，单 worker 线程消费
+    // ========================================================================
+
+    /** 把冻结的 session JSON 原子写入 pending 目录并排队（幂等，按 sessionId 去重） */
+    private void enqueueUpload(String sessId, String payload) {
+        try {
+            File dir = getPendingDir();
+            File tmp = new File(dir, sessId + ".tmp");
+            writeFile(tmp, payload);
+            File dst = new File(dir, sessId + ".json");
+            if (!tmp.renameTo(dst)) {
+                Log.e(TAG, "enqueueUpload rename failed: " + sessId);
+                return;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "enqueueUpload write failed: " + sessId + " — " + e.getMessage());
             return;
         }
+        if (queuedUploads.add(sessId)) {
+            uploadQueue.offer(sessId);
+            ensureUploadWorker();
+        }
+    }
 
-        // ★ v2.0: 串行队列 — 等上一个上传完成再开下一个
-        new Thread(() -> {
-            synchronized (uploadLock) {
-                // 等待上一个上传完成
-                while (uploadInProgress.get()) {
-                    try { uploadLock.wait(1000); } catch (InterruptedException e) { return; }
-                }
-                uploadInProgress.set(true);
-
-                try {
-                    uploadToGitHub(frozenTurnsJson, frozenSessionId, frozenScenario,
-                        frozenTurnCount, frozenIsFinal);
-                } finally {
-                    uploadInProgress.set(false);
-                    uploadLock.notifyAll();
-                }
+    /** App 启动时把 pending 目录里未传完的文件重新排队 */
+    private void enqueuePendingFromDisk() {
+        File dir = getPendingDir();
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        int n = 0;
+        for (File f : files) {
+            String name = f.getName();
+            if (!name.endsWith(".json")) continue;
+            String sessId = name.substring(0, name.length() - 5);
+            if (queuedUploads.add(sessId)) {
+                uploadQueue.offer(sessId);
+                n++;
             }
-        }).start();
+        }
+        if (n > 0) {
+            Log.d(TAG, "Re-queued " + n + " pending uploads from disk");
+            ensureUploadWorker();
+        }
+    }
+
+    /** 启动上传 worker（synchronized：与 worker 退出路径互斥，防止退出竞态丢任务） */
+    private synchronized void ensureUploadWorker() {
+        if (uploadWorker != null && uploadWorker.isAlive()) return;
+        uploadWorkerRunning.set(true);
+        Thread t = new Thread(this::uploadWorkerLoop);
+        t.setDaemon(true);
+        t.setName("UploadWorker");
+        uploadWorker = t;
+        t.start();
+    }
+
+    private static final long UPLOAD_RETRY_BACKOFF_MS = 30_000;
+
+    private void uploadWorkerLoop() {
+        while (uploadWorkerRunning.get()) {
+            String sessId;
+            try {
+                sessId = uploadQueue.poll(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                return;
+            }
+            if (sessId == null) {
+                // 队列空了：再扫一次磁盘（覆盖「上次失败遗留」），真空则退出线程
+                enqueuePendingFromDisk();
+                synchronized (this) {
+                    if (uploadQueue.peek() == null) {
+                        uploadWorker = null;
+                        return;
+                    }
+                }
+                continue;
+            }
+
+            File f = new File(getPendingDir(), sessId + ".json");
+            if (!f.exists()) {
+                // 已被更新/删除（例如同 session 的更新 checkpoint 覆盖后又成功）
+                queuedUploads.remove(sessId);
+                continue;
+            }
+
+            boolean ok = uploadPendingFile(f);
+            if (ok) {
+                if (!f.delete()) {
+                    Log.w(TAG, "Pending file delete failed: " + f.getName());
+                }
+                queuedUploads.remove(sessId);
+            } else {
+                // 失败：退避后重试（文件保留，queuedUploads 保留，重启也会续传）
+                Log.w(TAG, "Upload failed for " + sessId + ", retry in "
+                    + (UPLOAD_RETRY_BACKOFF_MS / 1000) + "s");
+                try {
+                    Thread.sleep(UPLOAD_RETRY_BACKOFF_MS);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                uploadQueue.offer(sessId);
+            }
+        }
+    }
+
+    /** 读取 pending 文件并上传。返回 true = 成功（可删文件） */
+    private boolean uploadPendingFile(File f) {
+        String content = readFileQuietly(f);
+        if (content == null || content.isEmpty()) {
+            Log.e(TAG, "Pending file unreadable, dropping: " + f.getName());
+            return true; // 读不出内容，重试无意义，丢弃避免死循环
+        }
+        try {
+            JSONObject session = new JSONObject(content);
+            String sessId = session.optString("session_id",
+                f.getName().replace(".json", ""));
+            String scen = session.optString("scenario", "Unknown");
+            boolean isFinal = session.optBoolean("is_final", false);
+            int turnCount = session.optInt("turn_count", 0);
+            return uploadToGitHub(content, sessId, scen, turnCount, isFinal);
+        } catch (JSONException e) {
+            Log.e(TAG, "Pending file corrupt, dropping: " + f.getName());
+            return true; // 坏文件，重试无意义
+        }
     }
 
     /**
      * 构建整局数据JSON
-     * ★ v2.0: 使用传入的冻结参数，不读取可变字段
+     * ★ v2.4: 调用方必须已持有 this 锁（onSummaryData/finalizeAndUpload 均 synchronized），
+     * 此时读取 live turns 安全；返回的 JSONObject 与可变状态脱钩，可安全传给后台线程。
      */
     private JSONObject buildSessionJson(boolean isFinal, String sessId,
             String scen, TurnSnapshot prevSnap) {
@@ -814,7 +1028,7 @@ public class DataCollector {
             JSONObject session = new JSONObject();
             session.put("session_id", sessId);
             session.put("schema_version", 3);
-            session.put("app_version", "v2.3");
+            session.put("app_version", "v2.4");
             session.put("app_commit", BuildConfig.VERSION_NAME);
             session.put("scenario", scen != null ? scen : "Unknown");
             session.put("turn_count", turns.size());
@@ -940,9 +1154,10 @@ public class DataCollector {
     }
 
     /**
-     * ★ v2.0: 上传到 GitHub — 使用传入的冻结参数
+     * ★ v2.4: 返回 true=上传成功。失败由调用方（worker）退避重试；
+     * 本方法绝不修改当前 session 状态（不再调用 startNewSession）。
      */
-    private void uploadToGitHub(String jsonContent, String sessId,
+    private boolean uploadToGitHub(String jsonContent, String sessId,
             String scen, int turnCount, boolean isFinal) {
         try {
             String scenarioDir = (scen != null && !scen.isEmpty()) ? scen : "Unknown";
@@ -951,7 +1166,11 @@ public class DataCollector {
             String path = GITHUB_PATH + "/" + scenarioDir + "/" + filename;
             String apiUrl = "https://api.github.com/repos/" + GITHUB_REPO + "/contents/" + path;
 
-            // ★ v2.0: 只在第一次或 isFinal 时 GET SHA，中间用缓存的 SHA
+            // ★ v2.4: SHA 缓存按远端路径 keyed — 换一个文件就必须重新 GET，
+            // 否则拿别的文件的 SHA 会稳定 409（isFinal 也强制 GET 复核）
+            if (!apiUrl.equals(lastUploadedPath)) {
+                lastUploadedSha = null;
+            }
             String sha = lastUploadedSha;
             if (sha == null || isFinal) {
                 try {
@@ -1021,12 +1240,12 @@ public class DataCollector {
                     if (content != null) {
                         lastUploadedSha = content.optString("sha", lastUploadedSha);
                     }
+                    lastUploadedPath = apiUrl;
                 } catch (Exception ignored) {}
 
                 Log.d(TAG, "Upload success: " + filename + " (isFinal=" + isFinal + ")");
-                if (isFinal) {
-                    startNewSession();
-                }
+                conn.disconnect();
+                return true;
             } else {
                 BufferedReader reader = new BufferedReader(
                     new InputStreamReader(conn.getErrorStream(), "UTF-8"));
@@ -1035,10 +1254,10 @@ public class DataCollector {
                 while ((line = reader.readLine()) != null) sb.append(line);
                 reader.close();
                 Log.e(TAG, "Upload failed (" + code + "): " + sb.toString());
-                // ★ v2.0: 409 Conflict 时清除 SHA 缓存重试
+                // 409 Conflict：SHA 失配，清缓存让下次重试重新 GET
                 if (code == 409) {
                     lastUploadedSha = null;
-                    Log.w(TAG, "409 conflict, cleared SHA cache, will retry next turn");
+                    Log.w(TAG, "409 conflict, cleared SHA cache");
                 }
             }
             conn.disconnect();
@@ -1046,6 +1265,7 @@ public class DataCollector {
         } catch (Exception e) {
             Log.e(TAG, "Upload error: " + e.getMessage());
         }
+        return false;
     }
 
     // ========================================================================
@@ -1089,6 +1309,7 @@ public class DataCollector {
             o.put("turn", turn);
             o.put("month", month);
             o.put("half", half);
+            if (scenario != null && !scenario.isEmpty()) o.put("scenario", scenario);
             if (charaId > 0) o.put("chara_id", charaId);
             if (storyId > 0) o.put("story_id", storyId);
 
@@ -1178,12 +1399,13 @@ public class DataCollector {
             return o;
         }
 
-        /** ★ v2.0: 从 JSON 反序列化（用于恢复持久化状态） */
+        /** ★ v2.4: 全字段恢复 — 重启后不再用残缺数据覆盖完整上传 */
         static TurnSnapshot fromJson(JSONObject o) throws JSONException {
             TurnSnapshot s = new TurnSnapshot();
             s.turn = o.optInt("turn", 0);
             s.month = o.optInt("month", 0);
             s.half = o.optInt("half", 0);
+            s.scenario = o.optString("scenario", "");
             s.charaId = o.optInt("chara_id", 0);
             s.storyId = o.optInt("story_id", 0);
             s.actionTaken = o.optString("action_taken", "Unknown");
@@ -1202,6 +1424,71 @@ public class DataCollector {
                 s.fan = stats.optInt("fan", 0);
                 s.hasBadCondition = stats.optBoolean("has_bad_condition", false);
             }
+
+            // 动作元数据
+            s.actionSource = o.optString("action_source", "unknown");
+            s.actionConfidence = o.optDouble("action_confidence", 0.0);
+            s.actionCommandId = o.optInt("action_command_id", -1);
+            s.actionRawCommandId = o.optInt("action_raw_command_id", -1);
+            s.capturedAt = o.optLong("captured_at", System.currentTimeMillis());
+
+            // 训练选项（shining/heads 的 -1 未知语义原样保留）
+            JSONArray trArr = o.optJSONArray("trainings");
+            if (trArr != null) {
+                s.trainings = new TrainingOption[trArr.length()];
+                for (int i = 0; i < trArr.length(); i++) {
+                    JSONObject tr = trArr.optJSONObject(i);
+                    TrainingOption opt = new TrainingOption();
+                    if (tr == null) { s.trainings[i] = opt; continue; }
+                    opt.name = tr.optString("name", "");
+                    opt.commandId = tr.optInt("command_id", 0);
+                    Object ie = tr.opt("is_enable");
+                    opt.isEnabled = (ie instanceof Boolean) ? (Boolean) ie
+                        : tr.optInt("is_enable", 1) != 0;
+                    JSONObject g = tr.optJSONObject("gains");
+                    if (g != null) {
+                        opt.gainSpeed = g.optInt("Speed", 0);
+                        opt.gainStamina = g.optInt("Stamina", 0);
+                        opt.gainPower = g.optInt("Power", 0);
+                        opt.gainGuts = g.optInt("Guts", 0);
+                        opt.gainWisdom = g.optInt("Wisdom", 0);
+                        opt.gainSkillPt = g.optInt("SkillPt", 0);
+                        opt.vitalCost = -g.optInt("HP", 0);
+                    }
+                    opt.failureRate = tr.optInt("failure_rate", 0);
+                    opt.shining = tr.optInt("shining", -1);
+                    opt.heads = tr.optInt("heads", -1);
+                    s.trainings[i] = opt;
+                }
+            }
+
+            // AI 推荐
+            JSONObject ai = o.optJSONObject("ai_recommend");
+            if (ai != null) {
+                s.aiBest = ai.optString("best", null);
+                s.aiScore = ai.optInt("score", 0);
+                s.skillEval = ai.optInt("skill_eval", 0);
+                s.skillCount = ai.optInt("skill_count", 0);
+            }
+
+            // 原始 JSON 透传字段（转回字符串保存）
+            JSONArray gauge = o.optJSONArray("gauge_gains");
+            if (gauge != null) s.gaugeGainsRaw = gauge.toString();
+            JSONArray sc = o.optJSONArray("support_cards");
+            if (sc != null) s.supportCardsRaw = sc.toString();
+            JSONObject skills = o.optJSONObject("skills");
+            if (skills != null) s.skillsRaw = skills.toString();
+            JSONObject ramen = o.optJSONObject("ramen");
+            if (ramen != null) s.ramenRaw = ramen.toString();
+            JSONArray tl = o.optJSONArray("training_levels");
+            if (tl != null) s.trainingLevelsRaw = tl.toString();
+            JSONArray buffs = o.optJSONArray("buffs");
+            if (buffs != null) s.buffsRaw = buffs.toString();
+            JSONArray effectIds = o.optJSONArray("chara_effect_ids");
+            if (effectIds != null) s.charaEffectIds = effectIds.toString();
+            JSONArray eval = o.optJSONArray("evaluation");
+            if (eval != null) s.evaluationRaw = eval.toString();
+
             return s;
         }
     }

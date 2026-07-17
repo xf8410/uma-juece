@@ -2536,10 +2536,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 } else if (ACTION_UPLOAD_DATA.equals(action)) {
                     // 手动上传当前育成数据
                     if (dataCollector != null && dataCollector.getTurnCount() > 0) {
-                        Log.d(TAG, "Manual upload requested, turns: " + dataCollector.getTurnCount());
-                        dataCollector.finalizeAndUpload();
+                        int finalized = dataCollector.finalizeAndUpload();
+                        Log.d(TAG, "Manual upload requested, turns: " + finalized);
                         Toast.makeText(FloatingWindowService.this,
-                            dataCollector.getTurnCount() + "回合数据上传中...",
+                            finalized + "回合数据上传中...",
                             Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(FloatingWindowService.this,
