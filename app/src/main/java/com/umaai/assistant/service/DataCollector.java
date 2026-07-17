@@ -1096,7 +1096,7 @@ public class DataCollector {
             session.put("started_at", turns.isEmpty() ? System.currentTimeMillis() : turns.get(0).capturedAt);
             session.put("is_final", isFinal);
             session.put("valid", true);
-            session.put("mapping_version", "v2.3_102sta_105pow");
+            session.put("mapping_version", "v2.4_102power_105stamina");
 
             // 回合数据
             JSONArray turnsArr = new JSONArray();
