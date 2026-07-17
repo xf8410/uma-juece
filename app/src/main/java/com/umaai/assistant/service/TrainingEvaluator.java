@@ -179,16 +179,19 @@ public class TrainingEvaluator {
 
     private static final Map<Integer, Integer> CMD_TO_IDX = new HashMap<>();
     static {
+        // ★ 2026-07-17 修正：游戏内 command_id 与 UI 顺序速耐力根智相反
+        // 102=Power(力量)、105=Stamina(耐力)，证据：小海湾SSR 30016=105、小栗帽SSR 30024=102
         CMD_TO_IDX.put(101, 0); // Speed
-        CMD_TO_IDX.put(102, 1); // Stamina
+        CMD_TO_IDX.put(105, 1); // Stamina
         CMD_TO_IDX.put(103, 3); // Guts
-        CMD_TO_IDX.put(105, 2); // Power
+        CMD_TO_IDX.put(102, 2); // Power
         CMD_TO_IDX.put(106, 4); // Wisdom
-        // ★ v3.22.57: Ramen scenario uses 601-605 command IDs
+        // Ramen scenario 601-605：按位配对普通指令（601↔101, 602↔102…605↔106）
+        // 配对结构未变，语义随普通指令修正；配对本身待手机运行时验证
         CMD_TO_IDX.put(601, 0); // Ramen Speed
-        CMD_TO_IDX.put(602, 1); // Ramen Stamina
+        CMD_TO_IDX.put(604, 1); // Ramen Stamina
         CMD_TO_IDX.put(603, 3); // Ramen Guts
-        CMD_TO_IDX.put(604, 2); // Ramen Power
+        CMD_TO_IDX.put(602, 2); // Ramen Power
         CMD_TO_IDX.put(605, 4); // Ramen Wisdom
     }
 

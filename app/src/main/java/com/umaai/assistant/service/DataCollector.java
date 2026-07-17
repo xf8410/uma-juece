@@ -683,9 +683,9 @@ public class DataCollector {
                     changedCount++;
                     switch (cmdId) {
                         case 101: changedAction = ACTION_SPEED; break;
-                        case 102: changedAction = ACTION_STAMINA; break;
+                        case 105: changedAction = ACTION_STAMINA; break;
                         case 103: changedAction = ACTION_GUTS; break;
-                        case 105: changedAction = ACTION_POWER; break;
+                        case 102: changedAction = ACTION_POWER; break;
                         case 106: changedAction = ACTION_WISDOM; break;
                     }
                 }
@@ -733,7 +733,8 @@ public class DataCollector {
         // 找属性变化最大的方向，然后匹配有对应 command_id 的训练
         int[] deltas = {dSpeed, dStamina, dGuts, dPower, dWisdom};
         String[] actions = {ACTION_SPEED, ACTION_STAMINA, ACTION_GUTS, ACTION_POWER, ACTION_WISDOM};
-        int[] commandIds = {101, 102, 103, 105, 106}; // ★ 精确映射，无 104
+        // ★ 2026-07-17 修正：command_id 与 deltas 同序（速/耐/根/力/智）— 游戏内 105=耐力、102=力量
+        int[] commandIds = {101, 105, 103, 102, 106}; // 无 104
 
         // 找最大变化方向
         int maxIdx = 0;

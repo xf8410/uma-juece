@@ -1280,8 +1280,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         else if (cardType == 1) {
                             switch (row.optInt("command_id", 0)) {
                                 case 101: shortType = "速"; break;
-                                case 102: shortType = "耐"; break;
-                                case 105: shortType = "力"; break;
+                                case 102: shortType = "力"; break;
+                                case 105: shortType = "耐"; break;
                                 case 103: shortType = "根"; break;
                                 case 106: shortType = "智"; break;
                                 default: break; // command_id=0 等特殊卡不猜类型
@@ -1465,8 +1465,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         int cmdId = -1;
         int ramenCmdId = -1;
         if ("Speed".equals(gainKey)) { cmdId = 101; ramenCmdId = 601; }
-        else if ("Stamina".equals(gainKey)) { cmdId = 102; ramenCmdId = 602; }
-        else if ("Power".equals(gainKey)) { cmdId = 105; ramenCmdId = 604; }
+        else if ("Stamina".equals(gainKey)) { cmdId = 105; ramenCmdId = 604; }
+        else if ("Power".equals(gainKey)) { cmdId = 102; ramenCmdId = 602; }
         else if ("Guts".equals(gainKey)) { cmdId = 103; ramenCmdId = 603; }
         else if ("Wiz".equals(gainKey)) { cmdId = 106; ramenCmdId = 605; }
 
@@ -1594,11 +1594,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private void updateTrainingLevels(JSONArray trainingLevels) {
         java.util.Map<Integer, Integer> cmdMap = new java.util.HashMap<>();
-        cmdMap.put(101, 0); cmdMap.put(102, 1); cmdMap.put(103, 3);
-        cmdMap.put(105, 2); cmdMap.put(106, 4);
+        cmdMap.put(101, 0); cmdMap.put(102, 2); cmdMap.put(103, 3);
+        cmdMap.put(105, 1); cmdMap.put(106, 4);
         // Ramen scenario: 601-605 map to same positions
-        cmdMap.put(601, 0); cmdMap.put(602, 1); cmdMap.put(603, 3);
-        cmdMap.put(604, 2); cmdMap.put(605, 4);
+        cmdMap.put(601, 0); cmdMap.put(602, 2); cmdMap.put(603, 3);
+        cmdMap.put(604, 1); cmdMap.put(605, 4);
 
         int[] levels = {1, 1, 1, 1, 1};
         TextView[] lvViews = {tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv};
