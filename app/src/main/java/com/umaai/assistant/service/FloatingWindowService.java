@@ -1465,9 +1465,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         int cmdId = -1;
         int ramenCmdId = -1;
         if ("Speed".equals(gainKey)) { cmdId = 101; ramenCmdId = 601; }
-        else if ("Stamina".equals(gainKey)) { cmdId = 105; ramenCmdId = 604; }
-        else if ("Power".equals(gainKey)) { cmdId = 102; ramenCmdId = 602; }
-        else if ("Guts".equals(gainKey)) { cmdId = 103; ramenCmdId = 603; }
+        else if ("Stamina".equals(gainKey)) { cmdId = 105; ramenCmdId = 602; }
+        else if ("Power".equals(gainKey)) { cmdId = 102; ramenCmdId = 603; }
+        else if ("Guts".equals(gainKey)) { cmdId = 103; ramenCmdId = 604; }
         else if ("Wiz".equals(gainKey)) { cmdId = 106; ramenCmdId = 605; }
 
         int failureRate = -1;
@@ -1597,8 +1597,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         cmdMap.put(101, 0); cmdMap.put(102, 2); cmdMap.put(103, 3);
         cmdMap.put(105, 1); cmdMap.put(106, 4);
         // Ramen scenario: 601-605 map to same positions
-        cmdMap.put(601, 0); cmdMap.put(602, 2); cmdMap.put(603, 3);
-        cmdMap.put(604, 1); cmdMap.put(605, 4);
+        cmdMap.put(601, 0); cmdMap.put(602, 1); cmdMap.put(603, 2);
+        cmdMap.put(604, 3); cmdMap.put(605, 4);
 
         int[] levels = {1, 1, 1, 1, 1};
         TextView[] lvViews = {tvSpdLv, tvStaLv, tvPwrLv, tvGutLv, tvWitLv};

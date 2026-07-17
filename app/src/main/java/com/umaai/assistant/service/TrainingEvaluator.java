@@ -186,12 +186,12 @@ public class TrainingEvaluator {
         CMD_TO_IDX.put(103, 3); // Guts
         CMD_TO_IDX.put(102, 2); // Power
         CMD_TO_IDX.put(106, 4); // Wisdom
-        // Ramen scenario 601-605：按位配对普通指令（601↔101, 602↔102…605↔106）
-        // 配对结构未变，语义随普通指令修正；配对本身待手机运行时验证
+        // Ramen scenario 601-605：经 MDB single_mode_training.base_command_id 实证
+        // 601→101速度、602→105耐力、603→102力量、604→103根性、605→106智力
         CMD_TO_IDX.put(601, 0); // Ramen Speed
-        CMD_TO_IDX.put(604, 1); // Ramen Stamina
-        CMD_TO_IDX.put(603, 3); // Ramen Guts
-        CMD_TO_IDX.put(602, 2); // Ramen Power
+        CMD_TO_IDX.put(602, 1); // Ramen Stamina
+        CMD_TO_IDX.put(603, 2); // Ramen Power
+        CMD_TO_IDX.put(604, 3); // Ramen Guts
         CMD_TO_IDX.put(605, 4); // Ramen Wisdom
     }
 
