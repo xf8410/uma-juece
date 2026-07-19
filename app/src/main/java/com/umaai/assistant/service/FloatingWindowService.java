@@ -170,7 +170,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     // 训练评分引擎
     private TrainingEvaluator evaluator = new TrainingEvaluator();
     private DataCollector dataCollector;
-    private DebugLogSaver debugLogSaver;
     private EndpointDumper endpointDumper;
 
     // 兜底轮询：5秒没收到push就主动去18765拉数据
@@ -195,7 +194,6 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         SharedPreferences prefs = getSharedPreferences(MainActivity.PREFS_NAME, MODE_PRIVATE);
         selectedScenario = prefs.getString(MainActivity.KEY_SCENARIO, "URA");
         dataCollector = new DataCollector(this);
-        debugLogSaver = new DebugLogSaver(this);
         endpointDumper = new EndpointDumper(this);
 
         handler.postDelayed(this::createFloatingView, 300);
@@ -353,15 +351,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
                 lastDataTime = System.currentTimeMillis();
 
-                // ★ 数据收集：记录回合快照
+                // 整局训练数据只走DataCollector的持久上传队列，避免重复逐回合上传。
                 if (dataCollector != null) {
                     String action = dataCollector.onSummaryData(json);
                     int turnCount = dataCollector.getTurnCount();
-                    // ★ v1.19: Auto-save debug log every new turn
-                    boolean logSaved = debugLogSaver != null && debugLogSaver.onSummaryUpdate(json, rawJson);
                     if (tvHookStatus != null) {
-                        String logStatus = debugLogSaver != null ? " " + debugLogSaver.getStatusText() : "";
-                        tvHookStatus.setText("Push:ON 記録:" + turnCount + logStatus);
+                        tvHookStatus.setText("Push:ON 記録:" + turnCount);
                         tvHookStatus.setTextColor(0xFF00FF88);
                     }
                 }
@@ -2355,19 +2350,27 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             Log.d(TAG, "Floating view added");
 
             View btnClose = floatingView.findViewById(R.id.btn_close);
+            // 拉面按钮：合并三个端点后只产生一次GitHub提交。
             TextView btnLog = floatingView.findViewById(R.id.btn_debug_log);
             if (btnLog != null) {
                 btnLog.setOnClickListener(v -> {
-                    if (debugLogSaver != null) {
-                        debugLogSaver.manualSave((success, msg) ->
-                            handler.post(() -> {
+                    if (endpointDumper == null) return;
+                    final TextView btn = (TextView) v;
+                    final int origColor = btn.getCurrentTextColor();
+                    btn.setText("···");
+                    btn.setTextColor(0xFF00FF88);
+                    endpointDumper.dumpRamenSnapshot(currentScenario,
+                            (ok, fail, fails) -> handler.post(() -> {
+                                btn.setText("拉面");
+                                btn.setTextColor(origColor);
                                 if (tvHookStatus != null) {
-                                    tvHookStatus.setText("Log:" + msg);
-                                    tvHookStatus.setTextColor(success ? 0xFF00FF88 : 0xFFFF4444);
+                                    tvHookStatus.setText(fail == 0
+                                            ? "拉面快照上传成功"
+                                            : "拉面快照失败:" + fails.trim());
+                                    tvHookStatus.setTextColor(
+                                            fail == 0 ? 0xFF00FF88 : 0xFFFF4444);
                                 }
-                            })
-                        );
-                    }
+                            }));
                 });
             }
 

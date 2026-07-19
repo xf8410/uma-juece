@@ -371,7 +371,7 @@
             android:layout_height="wrap_content"
             android:textColor="#666666"
             android:textSize="8sp"
-            android:text="LOG"
+            android:text="拉面"
             android:paddingStart="6dp"
             android:paddingEnd="4dp"
             android:clickable="true"

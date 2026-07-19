@@ -47,6 +47,13 @@ public class EndpointDumper {
 
     private static final String BASE_URL = "http://127.0.0.1:18765";
 
+    // 轻量证据快照：合并成一个JSON、一次GitHub提交，避免手工复制大JSON。
+    private static final String[][] RAMEN_SNAPSHOT_ENDPOINTS = {
+        {"/debug/ramen_participants", "participants"},
+        {"/debug/ramen_planner_state", "planner_state"},
+        {"/summary", "summary"},
+    };
+
     // 要抓取的端点列表（路径 -> 文件名）
     // v3.18.8: 移除/debug/breeders和/debug/params，这两个重端点容易卡游戏
     // 如需debug数据，单独请求即可
@@ -89,7 +96,92 @@ public class EndpointDumper {
     }
 
     /**
-     * 一键抓取所有端点并上传
+     * 拉面逆向轻量快照：抓取参与者、规划状态和summary，合并后只上传一个文件。
+     * 不包含/mdb、全端点扫描或危险的IL2CPP枚举。
+     */
+    public void dumpRamenSnapshot(String scenario, DumpCallback callback) {
+        if (dumping) {
+            showToast("上传中...");
+            return;
+        }
+        dumping = true;
+        cancelled = false;
+        String scenarioDir = sanitizePathSegment(
+                scenario != null && !scenario.isEmpty() ? scenario : "Unknown");
+        showToast("拉面快照上传中...");
+
+        new Thread(() -> {
+            int okCount = 0;
+            int failCount = 0;
+            StringBuilder failNames = new StringBuilder();
+            JSONObject payload = new JSONObject();
+            try {
+                payload.put("schema_version", 1);
+                payload.put("captured_at_ms", System.currentTimeMillis());
+                payload.put("scenario", scenarioDir);
+                JSONObject endpoints = new JSONObject();
+                for (int i = 0; i < RAMEN_SNAPSHOT_ENDPOINTS.length; i++) {
+                    String path = RAMEN_SNAPSHOT_ENDPOINTS[i][0];
+                    String key = RAMEN_SNAPSHOT_ENDPOINTS[i][1];
+                    if (i > 0) {
+                        try { Thread.sleep(REQUEST_INTERVAL_MS); } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                    String data = fetchUrl(BASE_URL + path);
+                    if (data == null || data.length() <= 2) {
+                        failCount++;
+                        failNames.append(path).append(" ");
+                        continue;
+                    }
+                    try {
+                        endpoints.put(key, new JSONObject(data));
+                    } catch (Exception notObject) {
+                        endpoints.put(key, data);
+                    }
+                    okCount++;
+                }
+                payload.put("endpoints", endpoints);
+
+                if (okCount > 0) {
+                    String timestamp = new SimpleDateFormat(
+                            "yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
+                    String remotePath = "ramen_evidence/" + scenarioDir + "/" + timestamp + ".json";
+                    if (!uploadToGitHub(payload.toString(2), remotePath,
+                            "upload ramen evidence " + scenarioDir)) {
+                        failCount++;
+                        failNames.append("github ");
+                    }
+                }
+            } catch (Exception e) {
+                failCount++;
+                failNames.append("payload ");
+                Log.e(TAG, "Ramen snapshot error: " + e.getMessage());
+            }
+
+            dumping = false;
+            final int ok = okCount;
+            final int fail = failCount;
+            final String fails = failNames.toString();
+            handler().post(() -> {
+                String msg = fail == 0
+                        ? "拉面快照上传成功（" + ok + "端点）"
+                        : "拉面快照 " + ok + "OK/" + fail + "NG: " + fails.trim();
+                Toast.makeText(context, msg,
+                        fail > 0 ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+                if (callback != null) callback.onDumpComplete(ok, fail, fails);
+            });
+        }).start();
+    }
+
+    private String sanitizePathSegment(String value) {
+        String safe = value.replaceAll("[^A-Za-z0-9._-]", "_");
+        return safe.isEmpty() ? "Unknown" : safe;
+    }
+
+    /**
+     * 一键抓取所有端点并上传（保留为显式全量诊断，不用于日常拉面映射）。
      * @param scenario 当前剧本名（用于目录分类）
      */
     public void dumpAll(String scenario, DumpCallback callback) {
