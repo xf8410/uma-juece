@@ -38,7 +38,7 @@ public class RemoteDataLoader {
     private static final String TAG = "UmaData";
     public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 4; // 升级版本号触发重新加载
+    private static final int CACHE_VERSION = 5; // 强制补齐完整支援卡库和中文名称表
 
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";

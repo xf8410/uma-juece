@@ -146,6 +146,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private java.util.Map<Integer, String> supportCardNameCache = null;
     private java.util.Map<Integer, Integer> supportCardCharaCache = null;
     private java.util.Map<Integer, String> supportCardTypeCache = null;
+    private boolean supportNameCachesComplete = false;
     private java.util.Map<Integer, String> npcNameCache = null;
 
     // HTTP服务
@@ -1224,8 +1225,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
 
     private void ensureNameCaches() {
-        if (supportCardNameCache != null && supportCardCharaCache != null
-                && supportCardTypeCache != null && npcNameCache != null) return;
+        // 首次浮窗刷新可能早于 RemoteDataLoader 下载完成。不能把只有新卡补丁的
+        // 临时结果永久当成完整缓存，否则旧卡会一直回退成“支援卡+ID”。
+        if (supportNameCachesComplete) return;
         supportCardNameCache = new java.util.HashMap<>();
         supportCardCharaCache = new java.util.HashMap<>();
         supportCardTypeCache = new java.util.HashMap<>();
@@ -1319,7 +1321,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     + " links=" + supportCardCharaCache.size()
                     + " types=" + supportCardTypeCache.size()
                     + " names=" + npcNameCache.size());
+            supportNameCachesComplete = namesContent != null && fullCardContent != null;
+            if (!supportNameCachesComplete) {
+                Log.w(TAG, "Support name caches incomplete; retry on next summary");
+            }
         } catch (Exception e) {
+            supportNameCachesComplete = false;
             Log.e(TAG, "ensureNameCaches error: " + e.getMessage());
         }
     }
