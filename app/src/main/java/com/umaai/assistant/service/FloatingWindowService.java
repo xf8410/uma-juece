@@ -148,6 +148,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private java.util.Map<Integer, String> supportCardTypeCache = null;
     private boolean supportNameCachesComplete = false;
     private java.util.Map<Integer, String> npcNameCache = null;
+    // Scenario 14 MDB catalogs downloaded by RemoteDataLoader.
+    private java.util.Map<Integer, String> ramenRegionNameCache = null;
+    private java.util.Map<Integer, JSONObject> ramenEffectRecordCache = null;
 
     // HTTP服务
     private HttpDataService httpServer;
@@ -289,16 +292,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                 int val = ae.optInt("value", 0);
                                 String catName;
                                 switch (cat) {
-                                    case 1: catName = "试食会"; break;
-                                    case 2: catName = "地区"; break;
-                                    case 4: catName = "隐味"; break;
+                                    case 1: catName = "地区效果"; break;
+                                    case 2: catName = "吃面效果"; break;
+                                    case 4: catName = "特殊效果"; break;
                                     default: catName = "Cat" + cat; break;
                                 }
                                 JSONObject buffItem = new JSONObject();
                                 buffItem.put("name", catName + "#" + eid);
+                                buffItem.put("EffectCategory", cat);
                                 buffItem.put("EffectId", eid);
                                 buffItem.put("EffectValue", val);
-                                buffItem.put("desc", "+" + val + "%");
+                                buffItem.put("desc", "");
                                 buffItem.put("type", "Ramen");
                                 buffs.put(buffItem);
                             }
@@ -327,18 +331,19 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                                     int cat = ae.optInt("category", -1);
                                     String catName;
                                     switch (cat) {
-                                        case 1: catName = "試食会"; break;
-                                        case 2: catName = "地域"; break;
-                                        case 4: catName = "隐味"; break;
+                                        case 1: catName = "地区效果"; break;
+                                        case 2: catName = "吃面效果"; break;
+                                        case 4: catName = "特殊效果"; break;
                                         default: catName = "Cat" + cat; break;
                                     }
                                     JSONObject buffItem = new JSONObject();
                                     int aeId = ae.optInt("id", 0);
                                     int aeVal = ae.optInt("value", 0);
                                     buffItem.put("name", catName + "#" + aeId);
+                                    buffItem.put("EffectCategory", cat);
                                     buffItem.put("EffectId", aeId);
                                     buffItem.put("EffectValue", aeVal);
-                                    buffItem.put("desc", "+" + aeVal + "%");
+                                    buffItem.put("desc", "");
                                     buffItem.put("type", "Ramen");
                                     newBuffs.put(buffItem);
                                 }
@@ -872,10 +877,20 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             info.append(" ");
         }
 
-        // SpecialFeelingNum (隐藏调味料秘方数量)
+        // 拉面资源：三种普通诀窍共享10格，万能资源独立上限4。
+        JSONArray sozai = ramen.optJSONArray("sozai");
+        if (sozai != null && sozai.length() >= 3) {
+            int noodle = sozai.optInt(0, 0);
+            int soup = sozai.optInt(1, 0);
+            int topping = sozai.optInt(2, 0);
+            info.append("材料 面").append(noodle)
+                    .append(" 汤").append(soup)
+                    .append(" 配").append(topping)
+                    .append(" (").append(noodle + soup + topping).append("/10) ");
+        }
         int sfn = ramen.optInt("special_feeling_num", -1);
         if (sfn >= 0) {
-            info.append("隐味:").append(sfn).append(" ");
+            info.append("万能:").append(sfn).append("/4 ");
         }
 
         // RecommendType
@@ -929,28 +944,18 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             tvRamenGauge.setVisibility(View.GONE);
         }
 
-        // Also keep the old buff_detail display for FeelingInfo/Region
+        // 地区必须按 Region ID 显示；第三阶段同名地区仍是独立效果。
         StringBuilder buffInfo = new StringBuilder();
-
-        // FeelingInfo array - count and types
-        JSONArray feelingInfo = ramen.optJSONArray("feeling_info");
-        if (feelingInfo != null && feelingInfo.length() > 0) {
-            int goodCount = 0, badCount = 0;
-            for (int fi = 0; fi < feelingInfo.length(); fi++) {
-                JSONObject fe = feelingInfo.optJSONObject(fi);
-                if (fe == null) continue;
-                int fType = fe.optInt("FeelingType", 0);
-                if (fType == 10 || fType == 11) goodCount++;
-                else if (fType >= 1 && fType <= 7) badCount++;
-            }
-            if (goodCount > 0) buffInfo.append("好效:").append(goodCount).append(" ");
-            if (badCount > 0) buffInfo.append("坏效:").append(badCount).append(" ");
-        }
-
-        // SelectedRegionIds
         JSONArray regionIds = ramen.optJSONArray("selected_region_ids");
         if (regionIds != null && regionIds.length() > 0) {
-            buffInfo.append("地区:").append(regionIds.length());
+            ensureRamenCatalogs();
+            buffInfo.append("已选地区:");
+            for (int i = 0; i < regionIds.length(); i++) {
+                if (i > 0) buffInfo.append("/");
+                int id = regionIds.optInt(i, 0);
+                String name = ramenRegionNameCache.get(id);
+                buffInfo.append(name == null ? "ID" + id : name + "#" + id);
+            }
         }
 
         if (tvBuffDetail != null && buffInfo.length() > 0) {
@@ -1161,45 +1166,99 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     }
 
 
-    /**
-     * 拉面杯效果 ID → 中文名称映射
-     *
-     * MDB single_mode_14_basic_effect / region_effect 表的 effect_type 字段:
-     *   2  = 速度加成
-     *   3  = 耐力加成
-     *   4  = 力量加成
-     *   5  = 根性加成
-     *   6  = 智力加成
-     *   15 = 技能点加成
-     *   19 = 隐藏调味料效果
-     *   22 = 全属性加成
-     *   30 = 训练 gauge 加成
-     *   40 = 干劲上升
-     *   41 = 体力恢复
-     *
-     * name 格式: "试食会#1234" / "地区#5678" / "隐味#9012"
-     * 返回: "速+15%" / "全+30%" / "隐味+1" 等
-     */
-    private String resolveRamenEffectName(String rawName, int effectId) {
-        if (rawName == null || rawName.isEmpty()) return "?";
-
-        // 解析 category 前缀
-        String prefix;
-        if (rawName.startsWith("试食会") || rawName.startsWith("試食会")) {
-            prefix = "试食";
-        } else if (rawName.startsWith("地区") || rawName.startsWith("地域")) {
-            prefix = "地域";
-        } else if (rawName.startsWith("隐味") || rawName.startsWith("隠味")) {
-            prefix = "隐味";
-        } else {
-            // 不是已知格式，直接返回去掉 #ID 后的名称
-            int hashIdx = rawName.indexOf('#');
-            return hashIdx >= 0 ? rawName.substring(0, hashIdx) : rawName;
+    /** Load Scenario 14 catalogs. Failure keeps raw IDs visible instead of inventing semantics. */
+    private void ensureRamenCatalogs() {
+        if (ramenEffectRecordCache != null && !ramenEffectRecordCache.isEmpty()) return;
+        ramenRegionNameCache = new java.util.HashMap<>();
+        ramenEffectRecordCache = new java.util.HashMap<>();
+        try {
+            String raw = RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_REGIONS);
+            if (raw == null) return;
+            JSONArray regions = new JSONObject(raw).optJSONArray("regions");
+            if (regions == null) return;
+            for (int i = 0; i < regions.length(); i++) {
+                JSONObject region = regions.optJSONObject(i);
+                if (region == null) continue;
+                int id = region.optInt("region_id", 0);
+                if (id <= 0) continue;
+                ramenRegionNameCache.put(id, region.optString("name_ja", "地区" + id));
+                JSONArray effects = region.optJSONArray("effects");
+                if (effects == null) continue;
+                for (int j = 0; j < effects.length(); j++) {
+                    JSONObject effect = effects.optJSONObject(j);
+                    if (effect == null) continue;
+                    int effectRecordId = effect.optInt("id", 0);
+                    if (effectRecordId > 0) {
+                        effect.put("region_name_ja", ramenRegionNameCache.get(id));
+                        ramenEffectRecordCache.put(effectRecordId, effect);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Ramen region catalog parse failed: " + e.getMessage());
         }
+    }
 
-        // 从 desc 字段推断效果类型（如果调用方已经设了 desc）
-        // 这里只能返回前缀，具体数值由调用方拼接
-        return prefix;
+    private String stripRamenMarkup(String text) {
+        if (text == null) return "";
+        return text.replaceAll("<[^>]+>", "")
+                .replace("\\n", " ")
+                .replace("\n", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private int ramenCategory(JSONObject effect, String rawName) {
+        int category = effect.optInt("EffectCategory", -1);
+        if (category >= 0) return category;
+        // Compatibility: older hlpatch mislabeled category 1 as 試食会 and category 2 as 地域.
+        if (rawName.startsWith("地区效果") || rawName.startsWith("试食会") || rawName.startsWith("試食会")) return 1;
+        if (rawName.startsWith("吃面效果") || rawName.startsWith("地域") || rawName.startsWith("地区")) return 2;
+        if (rawName.startsWith("特殊效果") || rawName.startsWith("隐味") || rawName.startsWith("隠味")) return 4;
+        return -1;
+    }
+
+    /** Category 2 is the current-turn ramen action effect, not the RMJ checkpoint reward. */
+    private String resolveRamenActionEffect(int effectId, int value) {
+        String label;
+        String unit = "";
+        switch (effectId) {
+            case 1: case 4: case 9: label = "训练效果"; unit = "%"; break;
+            case 2: case 6: case 11: label = "失败率降低"; unit = "%"; break;
+            case 3: label = "羁绊"; break;
+            case 5: case 10: label = "友情加成"; unit = "%"; break;
+            case 7: case 12: label = "属性单次上限"; break;
+            case 8: case 13: label = "技能Pt单次上限"; break;
+            case 14: return "全编成支援Hint事件发生";
+            case 15: return "所选训练全部Hint效果发动";
+            default: return "吃面效果(ID" + effectId + ",值" + value + ")";
+        }
+        return label + (value >= 0 ? "+" + value + unit : "");
+    }
+
+    /** ActiveEffect category 1 EffectId is single_mode_14_region_effect.id, not region_id. */
+    private String resolveRamenRegionEffect(int effectRecordId, int value) {
+        ensureRamenCatalogs();
+        JSONObject effect = ramenEffectRecordCache.get(effectRecordId);
+        if (effect == null) {
+            return "地区效果(ID" + effectRecordId + ",值" + value + ")";
+        }
+        String name = effect.optString("region_name_ja", "地区");
+        String template = stripRamenMarkup(effect.optString("display_template", ""));
+        if (template.isEmpty()) return name + "(效果ID" + effectRecordId + ",值" + value + ")";
+        template = template.replace("{0}", String.valueOf(value));
+        return name + ":" + template;
+    }
+
+    private String resolveRamenEffect(JSONObject effect) {
+        String rawName = effect.optString("name", "");
+        int effectId = effect.optInt("EffectId", 0);
+        int value = effect.optInt("EffectValue", 0);
+        int category = ramenCategory(effect, rawName);
+        if (category == 1) return resolveRamenRegionEffect(effectId, value);
+        if (category == 2) return resolveRamenActionEffect(effectId, value);
+        if (category == 4) return "特殊效果(ID" + effectId + ",值" + value + ")";
+        return "未解析效果(类别" + category + ",ID" + effectId + ",值" + value + ")";
     }
 
     /**
@@ -1346,17 +1405,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     urafType = name;
                     urafState = b.optString("state", "");
                 } else {
-                    String desc = b.optString("desc", "");
-                    int val = b.optInt("EffectValue", 0);
-                    // ★ 把 "试食会#1234" 映射为具体效果名
-                    String displayName = resolveRamenEffectName(name, b.optInt("EffectId", 0));
                     if (effectStr.length() > 0) effectStr.append(" ");
-                    if (!desc.isEmpty()) {
-                        effectStr.append(displayName).append(desc);
-                    } else {
-                        effectStr.append(displayName);
-                        if (val > 0) effectStr.append("+").append(val);
-                    }
+                    effectStr.append(resolveRamenEffect(b));
                 }
             }
         }
