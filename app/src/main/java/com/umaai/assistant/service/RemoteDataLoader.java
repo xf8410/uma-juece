@@ -38,7 +38,7 @@ public class RemoteDataLoader {
     private static final String TAG = "UmaData";
     public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 6; // 强制补齐完整支援卡库和中文名称表
+    private static final int CACHE_VERSION = 7; // 增加 Scenario 14 Gauge 目录
 
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";
@@ -48,6 +48,7 @@ public class RemoteDataLoader {
     public static final String KEY_SUPPORT_CARD_DATA = "support_card_data";
     public static final String KEY_RAMEN_REGIONS = "ramen_regions";
     public static final String KEY_RAMEN_RESOURCES = "ramen_resources";
+    public static final String KEY_RAMEN_GAUGES = "ramen_gauges";
     private static final String KEY_CACHE_VER = "cache_version";
 
     // 文件缓存目录名
@@ -72,19 +73,22 @@ public class RemoteDataLoader {
                     DATA_BASE + "/scenario_14_ramen_model/region_catalog.json");
             boolean ramenResourcesOk = loadAndCache(prefs, cacheDir, KEY_RAMEN_RESOURCES,
                     DATA_BASE + "/scenario_14_ramen_model/resource_economy.json");
+            boolean ramenGaugesOk = loadAndCache(prefs, cacheDir, KEY_RAMEN_GAUGES,
+                    DATA_BASE + "/scenario_14_ramen_model/acquisition_gauge_catalog.json");
 
             // API2: 事件数据（含Values数组，~12MB）
             boolean eventsOk = loadAndCache(prefs, cacheDir, KEY_EVENTS, DATA_BASE + "/uma_events.json");
 
             boolean allOk = namesOk && eventsOk && skillsOk && factorsOk && scOk && scDataOk
-                    && ramenRegionsOk && ramenResourcesOk;
+                    && ramenRegionsOk && ramenResourcesOk && ramenGaugesOk;
             // 只有本版本所需数据全部可用时才更新版本号，避免完整卡库下载失败后
             // 被误判为缓存完成，导致后续启动不再重试。
             if (allOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
             Log.d(TAG, "Data load: names=" + namesOk + " events=" + eventsOk
                     + " skills=" + skillsOk + " factors=" + factorsOk
                     + " supportPatch=" + scOk + " supportData=" + scDataOk
-                    + " ramenRegions=" + ramenRegionsOk + " ramenResources=" + ramenResourcesOk);
+                    + " ramenRegions=" + ramenRegionsOk + " ramenResources=" + ramenResourcesOk
+                    + " ramenGauges=" + ramenGaugesOk);
 
             if (cb != null) cb.onLoaded(allOk);
         }).start();
@@ -101,7 +105,8 @@ public class RemoteDataLoader {
                 && getCachedData(ctx, KEY_SUPPORT_CARDS) != null
                 && getCachedData(ctx, KEY_SUPPORT_CARD_DATA) != null
                 && getCachedData(ctx, KEY_RAMEN_REGIONS) != null
-                && getCachedData(ctx, KEY_RAMEN_RESOURCES) != null;
+                && getCachedData(ctx, KEY_RAMEN_RESOURCES) != null
+                && getCachedData(ctx, KEY_RAMEN_GAUGES) != null;
     }
 
     /** 获取缓存数据：优先从文件缓存读，fallback到SP */

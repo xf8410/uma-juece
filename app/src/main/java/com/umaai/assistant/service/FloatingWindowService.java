@@ -936,6 +936,15 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
+        String resourcePlan = RamenResourcePlanner.buildSummary(
+                ramen,
+                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_RESOURCES),
+                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_GAUGES));
+        if (!resourcePlan.isEmpty()) {
+            if (info.length() > 0) info.append("\n");
+            info.append(resourcePlan);
+        }
+
         // Display in ramen gauge status bar
         if (tvRamenGauge != null && info.length() > 0) {
             tvRamenGauge.setText(info.toString().trim());
