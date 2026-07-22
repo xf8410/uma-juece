@@ -371,7 +371,10 @@ public class TrainingEvaluator {
 
         // --- 4. 彩圈加成 ---
         int shiningCount = trData.optInt("shining", 0);
-        if (shiningCount > 0) {
+        // Scenario 14 ParamsIncDecInfoArray is copied from the Ramen response into
+        // TurnInfo as the current final gain. Friendship/region/ramen effects are
+        // already reflected there, so multiplying the score again would double-count.
+        if (shiningCount > 0 && !"Ramen".equals(scenario)) {
             score *= 1.0 + shiningCount * 0.15;
             score += shiningCount * SHINING_BONUS;
         }
@@ -391,11 +394,15 @@ public class TrainingEvaluator {
         }
 
         // --- 7. 训练类型偏好 ---
-        score += typeBonus[trainIdx];
+        // Ramen uses current response gains as the numeric source of truth. Keep
+        // unverified default scenario weights out of its ranking.
+        if (!"Ramen".equals(scenario)) {
+            score += typeBonus[trainIdx];
+        }
 
         // --- 8. 训练等级加成 ---
         int level = getTrainLevel(trainLevels, trainIdx);
-        if (level > 1) {
+        if (level > 1 && !"Ramen".equals(scenario)) {
             score += (level - 1) * TRAIN_LEVEL_BONUS;
         }
 
@@ -490,7 +497,9 @@ public class TrainingEvaluator {
         double totalTurn = (double) maxTurn;
         double reserve = RESERVE_STATUS_FACTOR * remainTurn * (1.0 - remainTurn / (totalTurn * 2.0));
 
-        int finalBonus = getFinalBonus();
+        // Scenario 14 has no confirmed end-of-run reserve constant. Do not reuse
+        // the generic +80 assumption when valuing its already-final runtime gains.
+        int finalBonus = "Ramen".equals(scenario) ? 0 : getFinalBonus();
         double total = 0.0;
 
         for (int i = 0; i < 5; i++) {
