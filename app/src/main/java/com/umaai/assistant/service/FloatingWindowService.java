@@ -878,8 +878,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
                 info.append(")");
             }
-            info.append("
-");
+            info.append("\n");
         }
 
         // 拉面资源：三种普通诀窍共享10格，万能资源独立上限4。
@@ -937,8 +936,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (ggStr.length() > 0) {
-                info.append("
-减槽预览：").append(ggStr);
+                info.append("\n减槽预览：").append(ggStr);
             }
         }
 
