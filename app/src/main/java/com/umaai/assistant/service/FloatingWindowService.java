@@ -148,6 +148,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private java.util.Map<Integer, String> supportCardTypeCache = null;
     private boolean supportNameCachesComplete = false;
     private java.util.Map<Integer, String> npcNameCache = null;
+    private java.util.Map<Integer, Integer> ramenPartnerCharaCache = null;
     // Scenario 14 MDB catalogs downloaded by RemoteDataLoader.
     private java.util.Map<Integer, String> ramenRegionNameCache = null;
     private java.util.Map<Integer, JSONObject> ramenEffectRecordCache = null;
@@ -874,7 +875,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
                 info.append(")");
             }
-            info.append(" ");
+            info.append("
+");
         }
 
         // 拉面资源：三种普通诀窍共享10格，万能资源独立上限4。
@@ -886,11 +888,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             info.append("材料 面").append(noodle)
                     .append(" 汤").append(soup)
                     .append(" 配").append(topping)
-                    .append(" (").append(noodle + soup + topping).append("/10) ");
+                    .append(" (").append(noodle + soup + topping).append("/10)");
         }
         int sfn = ramen.optInt("special_feeling_num", -1);
         if (sfn >= 0) {
-            info.append("万能:").append(sfn).append("/4 ");
+            info.append("　万能 ").append(sfn).append("/4");
         }
 
         // RecommendType
@@ -905,7 +907,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 case 5: rtName = "智推荐"; break;
                 default: rtName = "推" + rt; break;
             }
-            info.append(rtName).append(" ");
+            info.append("　").append(rtName);
         }
 
         // ★ Gauge gains — 试食会训练 gauge 进度
@@ -932,7 +934,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (ggStr.length() > 0) {
-                info.append("槽:").append(ggStr);
+                info.append("
+减槽预览：").append(ggStr);
             }
         }
 
@@ -1309,6 +1312,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         supportCardCharaCache = new java.util.HashMap<>();
         supportCardTypeCache = new java.util.HashMap<>();
         npcNameCache = new java.util.HashMap<>();
+        ramenPartnerCharaCache = new java.util.HashMap<>();
         try {
             String namesContent = RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_NAMES);
             if (namesContent != null) {
@@ -1325,6 +1329,21 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         if (id > 0 && (!nickname.isEmpty() || !name.isEmpty())) {
                             npcNameCache.put(id, !nickname.isEmpty() ? nickname : name);
                         }
+                    }
+                }
+            }
+
+            String uniqueCharaContent = RemoteDataLoader.getCachedData(
+                    this, RemoteDataLoader.KEY_UNIQUE_CHARA);
+            if (uniqueCharaContent != null) {
+                JSONArray rows = new JSONObject(uniqueCharaContent).optJSONArray("rows");
+                if (rows != null) {
+                    for (int i = 0; i < rows.length(); i++) {
+                        JSONObject row = rows.optJSONObject(i);
+                        if (row == null || row.optInt("scenario_id", 0) != 14) continue;
+                        int partnerId = row.optInt("partner_id", 0);
+                        int charaId = row.optInt("chara_id", 0);
+                        if (partnerId > 0 && charaId > 0) ramenPartnerCharaCache.put(partnerId, charaId);
                     }
                 }
             }
@@ -1397,8 +1416,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             Log.d(TAG, "Name caches: cards=" + supportCardNameCache.size()
                     + " links=" + supportCardCharaCache.size()
                     + " types=" + supportCardTypeCache.size()
-                    + " names=" + npcNameCache.size());
-            supportNameCachesComplete = namesContent != null && fullCardContent != null;
+                    + " names=" + npcNameCache.size()
+                    + " ramenPartners=" + ramenPartnerCharaCache.size());
+            supportNameCachesComplete = namesContent != null && fullCardContent != null
+                    && uniqueCharaContent != null;
             if (!supportNameCachesComplete) {
                 Log.w(TAG, "Support name caches incomplete; retry on next summary");
             }
@@ -1560,10 +1581,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
-        // ★ 伙伴名称显示：照 PC 版小黑板格式
-        // personType: 1=友人卡, 2=普通支援卡, 3=NPC, 4=理事长, 5=记者
-        // 显示: 名称:羁绊【彩】【Hint】
-        // ★ v2.4: 从 support_cards 和 uma_support_cards.json 查真实名称
+        // 三层参与者显示：携带支援卡、固定羁绊NPC、剧本伙伴。
+        // 只有支援卡与固定NPC显示羁绊；剧本伙伴只显示名称。
         ensureNameCaches();
         StringBuilder partnerStr = new StringBuilder();
         if (partners != null) {
@@ -1600,30 +1619,40 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
                 String pName;
                 String displayType = "";
-                if (supportCardId > 0) {
+                boolean isSupportCard = supportCardId > 0;
+                // Scenario 14 has three distinct participant layers:
+                // equipped support cards; fixed bond NPCs (director/reporter);
+                // and scenario partners whose gauges are not support-card bonds.
+                boolean isFixedBondNpc = "Ramen".equals(currentScenario)
+                        && (partnerId == 102 || partnerId == 103);
+                if (isSupportCard) {
                     pName = supportCardNameCache.getOrDefault(supportCardId, "");
                     if (pName.isEmpty()) {
                         int charaId = supportCardCharaCache.getOrDefault(supportCardId, 0);
                         if (charaId > 0) pName = npcNameCache.getOrDefault(charaId, "");
                     }
-                    boolean hasResolvedName = !pName.isEmpty();
-                    if (!hasResolvedName) pName = "支援卡" + supportCardId;
-                    // uma_names.nickname 已是经中文资料整理的短名；原样显示。
+                    if (pName.isEmpty()) pName = "支援卡" + supportCardId;
                     displayType = supportCardTypeCache.getOrDefault(supportCardId, "?");
                 } else {
-                    // partner_id 未证实等于 uma_names.id，不能据此编造 NPC 名称/类型。
-                    String soName = p.optString("name", "");
-                    if (!soName.isEmpty() && !soName.startsWith("伙伴")
-                            && !"NPC".equals(soName)) pName = soName;
-                    else pName = "伙伴" + partnerId;
+                    int charaId = ramenPartnerCharaCache.getOrDefault(partnerId, 0);
+                    if (charaId == 0 && npcNameCache.containsKey(partnerId)) charaId = partnerId;
+                    pName = charaId > 0 ? npcNameCache.getOrDefault(charaId, "") : "";
+                    if (charaId == 9002) pName = "理";
+                    if (pName.isEmpty()) {
+                        String soName = p.optString("name", "");
+                        if (!soName.isEmpty() && !soName.startsWith("伙伴")
+                                && !"NPC".equals(soName)) pName = soName;
+                        else pName = "伙伴" + partnerId;
+                    }
                 }
 
                 StringBuilder one = new StringBuilder();
                 if (!displayType.isEmpty()) one.append("[").append(displayType).append("]");
-                one.append(pName).append(" 羁绊").append(bond >= 0 ? bond : "?");
-                if (isShining) one.append(" 彩圈");
-                else if (!shiningKnown && supportCardId > 0) one.append(" 彩圈?");
-                if (isHint) one.append(" Hint");
+                one.append(pName);
+                if (isSupportCard || isFixedBondNpc) one.append(" 羁绊").append(bond >= 0 ? bond : "?");
+                if (isSupportCard && isShining) one.append(" 彩圈");
+                else if (isSupportCard && !shiningKnown) one.append(" 彩圈?");
+                if (isSupportCard && isHint) one.append(" Hint");
                 if (partnerStr.length() > 0) partnerStr.append("\n");
                 partnerStr.append(one);
             }

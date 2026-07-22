@@ -38,8 +38,8 @@ public final class RamenResourcePlanner {
             List<Integer> queue = readInventoryQueue(ramen);
             int[] counts = countQueue(queue);
 
-            StringBuilder out = new StringBuilder("资源规划(不含训练价值): ");
-            appendRecipeState(out, "当前", recipes, counts, special);
+            StringBuilder out = new StringBuilder("资源规划（不含训练价值）\n");
+            appendRecipeState(out, "当前：", recipes, counts, special);
 
             Map<Integer, Integer> currentRemaining = readCurrentRemaining(
                     ramen.optJSONArray("acquisition_gauges"));
@@ -47,7 +47,7 @@ public final class RamenResourcePlanner {
                     ramen.optJSONArray("command_feelings"));
             JSONArray vectors = ramen.optJSONArray("command_gauge_vectors");
             if (vectors == null || vectors.length() == 0 || currentRemaining.size() < 3) {
-                out.append("；缺少运行时最终减槽向量/当前槽，暂不推演训练后库存");
+                out.append("\n缺少运行时最终减槽向量/当前槽，暂不推演训练后库存");
                 return out.toString();
             }
 
@@ -60,7 +60,7 @@ public final class RamenResourcePlanner {
                 if (commandId < 0 || progress == null) continue;
 
                 Projection projection = project(queue, currentRemaining, progress, threshold, capacity);
-                out.append("；").append(commandName(commandId));
+                out.append("\n").append(commandName(commandId)).append("：");
                 Integer linked = linkedFeeling.get(commandId);
                 if (linked != null && linked >= 1 && linked <= 3) {
                     out.append("→").append(FEELING_NAMES[linked]);
@@ -72,7 +72,7 @@ public final class RamenResourcePlanner {
                     out.append(" 得").append(formatFeelings(projection.gained));
                     if (projection.evicted > 0) out.append(" FIFO顶旧").append(projection.evicted);
                 }
-                appendRecipeState(out, "后", recipes, countQueue(projection.queue), special);
+                appendRecipeState(out, "；训练后：", recipes, countQueue(projection.queue), special);
                 shown++;
             }
             return out.toString();
@@ -210,7 +210,7 @@ public final class RamenResourcePlanner {
                 feasible.add("#" + recipe.regionId + (substitutions > 0 ? "(万能" + substitutions + ")" : ""));
             }
         }
-        out.append(prefix).append("可做");
+        out.append(prefix).append("可做 ");
         if (feasible.isEmpty()) out.append("无");
         else out.append(String.join("/", feasible));
     }
@@ -222,7 +222,7 @@ public final class RamenResourcePlanner {
     }
 
     private static String formatVector(int[] values) {
-        return "[面" + values[1] + ",汤" + values[2] + ",配" + values[3] + "]";
+        return "[面" + values[1] + " 汤" + values[2] + " 配" + values[3] + "]";
     }
 
     private static String formatFeelings(List<Integer> ids) {

@@ -38,7 +38,7 @@ public class RemoteDataLoader {
     private static final String TAG = "UmaData";
     public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 7; // 增加 Scenario 14 Gauge 目录
+    private static final int CACHE_VERSION = 8; // 增加 Scenario 14 剧本伙伴映射
 
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";
@@ -49,6 +49,7 @@ public class RemoteDataLoader {
     public static final String KEY_RAMEN_REGIONS = "ramen_regions";
     public static final String KEY_RAMEN_RESOURCES = "ramen_resources";
     public static final String KEY_RAMEN_GAUGES = "ramen_gauges";
+    public static final String KEY_UNIQUE_CHARA = "unique_chara";
     private static final String KEY_CACHE_VER = "cache_version";
 
     // 文件缓存目录名
@@ -75,12 +76,14 @@ public class RemoteDataLoader {
                     DATA_BASE + "/scenario_14_ramen_model/resource_economy.json");
             boolean ramenGaugesOk = loadAndCache(prefs, cacheDir, KEY_RAMEN_GAUGES,
                     DATA_BASE + "/scenario_14_ramen_model/acquisition_gauge_catalog.json");
+            boolean uniqueCharaOk = loadAndCache(prefs, cacheDir, KEY_UNIQUE_CHARA,
+                    DATA_BASE + "/single_mode_unique_chara.json");
 
             // API2: 事件数据（含Values数组，~12MB）
             boolean eventsOk = loadAndCache(prefs, cacheDir, KEY_EVENTS, DATA_BASE + "/uma_events.json");
 
             boolean allOk = namesOk && eventsOk && skillsOk && factorsOk && scOk && scDataOk
-                    && ramenRegionsOk && ramenResourcesOk && ramenGaugesOk;
+                    && ramenRegionsOk && ramenResourcesOk && ramenGaugesOk && uniqueCharaOk;
             // 只有本版本所需数据全部可用时才更新版本号，避免完整卡库下载失败后
             // 被误判为缓存完成，导致后续启动不再重试。
             if (allOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
