@@ -38,7 +38,7 @@ public class RemoteDataLoader {
     private static final String TAG = "UmaData";
     public static final String DATA_BASE = "https://raw.githubusercontent.com/xf8410/uma-data/main";
     public static final String PREFS_NAME = "uma_data";
-    private static final int CACHE_VERSION = 8; // 增加 Scenario 14 剧本伙伴映射
+    private static final int CACHE_VERSION = 9; // 增加 Scenario 14 RMJ 检查点与吃面动作目录
 
     public static final String KEY_NAMES = "names";
     public static final String KEY_EVENTS = "events";
@@ -49,6 +49,8 @@ public class RemoteDataLoader {
     public static final String KEY_RAMEN_REGIONS = "ramen_regions";
     public static final String KEY_RAMEN_RESOURCES = "ramen_resources";
     public static final String KEY_RAMEN_GAUGES = "ramen_gauges";
+    public static final String KEY_RAMEN_CHECKPOINTS = "ramen_checkpoints";
+    public static final String KEY_RAMEN_ACTIONS = "ramen_actions";
     public static final String KEY_UNIQUE_CHARA = "unique_chara";
     private static final String KEY_CACHE_VER = "cache_version";
 
@@ -76,6 +78,10 @@ public class RemoteDataLoader {
                     DATA_BASE + "/scenario_14_ramen_model/resource_economy.json");
             boolean ramenGaugesOk = loadAndCache(prefs, cacheDir, KEY_RAMEN_GAUGES,
                     DATA_BASE + "/scenario_14_ramen_model/acquisition_gauge_catalog.json");
+            boolean ramenCheckpointsOk = loadAndCache(prefs, cacheDir, KEY_RAMEN_CHECKPOINTS,
+                    DATA_BASE + "/scenario_14_ramen_model/checkpoint_catalog.json");
+            boolean ramenActionsOk = loadAndCache(prefs, cacheDir, KEY_RAMEN_ACTIONS,
+                    DATA_BASE + "/scenario_14_ramen_model/ramen_action_catalog.json");
             boolean uniqueCharaOk = loadAndCache(prefs, cacheDir, KEY_UNIQUE_CHARA,
                     DATA_BASE + "/single_mode_unique_chara.json");
 
@@ -83,7 +89,8 @@ public class RemoteDataLoader {
             boolean eventsOk = loadAndCache(prefs, cacheDir, KEY_EVENTS, DATA_BASE + "/uma_events.json");
 
             boolean allOk = namesOk && eventsOk && skillsOk && factorsOk && scOk && scDataOk
-                    && ramenRegionsOk && ramenResourcesOk && ramenGaugesOk && uniqueCharaOk;
+                    && ramenRegionsOk && ramenResourcesOk && ramenGaugesOk
+                    && ramenCheckpointsOk && ramenActionsOk && uniqueCharaOk;
             // 只有本版本所需数据全部可用时才更新版本号，避免完整卡库下载失败后
             // 被误判为缓存完成，导致后续启动不再重试。
             if (allOk) prefs.edit().putInt(KEY_CACHE_VER, CACHE_VERSION).apply();
@@ -91,7 +98,8 @@ public class RemoteDataLoader {
                     + " skills=" + skillsOk + " factors=" + factorsOk
                     + " supportPatch=" + scOk + " supportData=" + scDataOk
                     + " ramenRegions=" + ramenRegionsOk + " ramenResources=" + ramenResourcesOk
-                    + " ramenGauges=" + ramenGaugesOk);
+                    + " ramenGauges=" + ramenGaugesOk
+                    + " ramenCheckpoints=" + ramenCheckpointsOk + " ramenActions=" + ramenActionsOk);
 
             if (cb != null) cb.onLoaded(allOk);
         }).start();
@@ -109,7 +117,10 @@ public class RemoteDataLoader {
                 && getCachedData(ctx, KEY_SUPPORT_CARD_DATA) != null
                 && getCachedData(ctx, KEY_RAMEN_REGIONS) != null
                 && getCachedData(ctx, KEY_RAMEN_RESOURCES) != null
-                && getCachedData(ctx, KEY_RAMEN_GAUGES) != null;
+                && getCachedData(ctx, KEY_RAMEN_GAUGES) != null
+                && getCachedData(ctx, KEY_RAMEN_CHECKPOINTS) != null
+                && getCachedData(ctx, KEY_RAMEN_ACTIONS) != null
+                && getCachedData(ctx, KEY_UNIQUE_CHARA) != null;
     }
 
     /** 获取缓存数据：优先从文件缓存读，fallback到SP */

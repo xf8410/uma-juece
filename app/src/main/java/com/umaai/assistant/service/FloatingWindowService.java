@@ -948,8 +948,16 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 json,
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_REGIONS),
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_RESOURCES));
+        String checkpointPlan = RamenCheckpointPlanner.buildSummary(
+                json,
+                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_CHECKPOINTS),
+                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_ACTIONS));
         StringBuilder planInfo = new StringBuilder();
-        if (!regionPlan.isEmpty()) planInfo.append(regionPlan);
+        if (!checkpointPlan.isEmpty()) planInfo.append(checkpointPlan);
+        if (!regionPlan.isEmpty()) {
+            if (planInfo.length() > 0) planInfo.append("\n");
+            planInfo.append(regionPlan);
+        }
         if (!resourcePlan.isEmpty()) {
             if (planInfo.length() > 0) planInfo.append("\n");
             planInfo.append(resourcePlan);
