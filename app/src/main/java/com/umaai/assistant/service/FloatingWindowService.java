@@ -364,7 +364,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     String action = dataCollector.onSummaryData(json);
                     int turnCount = dataCollector.getTurnCount();
                     if (tvHookStatus != null) {
-                        tvHookStatus.setText("Push:ON 記録:" + turnCount);
+                        tvHookStatus.setText("自动上传：开　已记录：" + turnCount + "回合");
                         tvHookStatus.setTextColor(0xFF00FF88);
                     }
                 }
@@ -388,7 +388,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 int total = stats.getInt("speed") + stats.getInt("stamina")
                         + stats.getInt("power") + stats.getInt("guts") + stats.getInt("wiz");
                 int pt = stats.getInt("skill_point");
-                tvTotal.setText("総" + total + " Pt" + pt);
+                tvTotal.setText("总" + total + " 技能点" + pt);
 
                 // 体力
                 int vital = stats.getInt("vital");
@@ -512,7 +512,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
                 // 状态
                 if (tvHookStatus != null) {
-                    tvHookStatus.setText("Push:ON");
+                    tvHookStatus.setText("自动上传：开");
                     tvHookStatus.setTextColor(0xFF00FF88);
                 }
 
@@ -537,13 +537,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private String scenarioIdToLabel(String id) {
         if (id == null) return "";
         switch (id) {
-            case "URA": return "URA";
+            case "URA": return "URA总决赛";
             case "Aoharu": return "青春杯";
             case "Climax": return "巅峰杯";
             case "GrandDrive": return "偶像杯";
             case "GrandMasters": return "女神杯";
             case "LArc": return "凯旋门杯";
-            case "UAF": return "UAF";
+            case "UAF": return "UAF运动会";
             case "Harvest": return "种田杯";
             case "Mecha": return "赛博杯";
             case "Legends": return "传奇杯";
@@ -572,13 +572,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
             String bestLabel = aiActionLabel(best);
             if ("Rest".equals(best)) {
-                tvRecommend.setText("▶ AI:休息 評価" + score);
+                tvRecommend.setText("▶ 助手：休息　评分" + score);
                 tvRecommend.setTextColor(0xFFFF4444);
             } else if ("Outgoing".equals(best)) {
-                tvRecommend.setText("▶ AI:外出 評価" + score);
+                tvRecommend.setText("▶ 助手：外出　评分" + score);
                 tvRecommend.setTextColor(0xFF66CCFF);
             } else {
-                tvRecommend.setText("▶ AI:" + bestLabel + " 評価" + score);
+                tvRecommend.setText("▶ 助手：" + bestLabel + "　评分" + score);
                 tvRecommend.setTextColor(aiActionColor(best));
             }
 
@@ -607,7 +607,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         } catch (Exception e) {
             Log.w(TAG, "AI parse error: " + e.getMessage());
-            tvRecommend.setText("▶ AI解析错误");
+            tvRecommend.setText("▶ 助手解析错误");
             tvRecommend.setTextColor(0xFFFF4444);
             if (tvAiDetail != null) tvAiDetail.setVisibility(View.GONE);
         }
@@ -861,7 +861,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             for (int i = 0; i < 5; i++) {
                 bar.append(i < moriagari ? "■" : "□");
             }
-            info.append("热").append(bar).append(" Lv").append(moriagari);
+            info.append("热").append(bar).append(" 等级").append(moriagari);
             if (cppt >= 0) {
                 info.append(" (").append(cppt);
                 // 下一级阈值
@@ -881,83 +881,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             info.append("\n");
         }
 
-        // 拉面资源：三种普通诀窍共享10格，万能资源独立上限4。
-        JSONArray sozai = ramen.optJSONArray("sozai");
-        if (sozai != null && sozai.length() >= 3) {
-            int noodle = sozai.optInt(0, 0);
-            int soup = sozai.optInt(1, 0);
-            int topping = sozai.optInt(2, 0);
-            info.append("材料 面").append(noodle)
-                    .append(" 汤").append(soup)
-                    .append(" 配").append(topping)
-                    .append(" (").append(noodle + soup + topping).append("/10)");
-        }
-        int sfn = ramen.optInt("special_feeling_num", -1);
-        if (sfn >= 0) {
-            info.append("　万能 ").append(sfn).append("/4");
-        }
-
-        // RecommendType
-        int rt = ramen.optInt("recommend_type", -1);
-        if (rt >= 0) {
-            String rtName;
-            switch (rt) {
-                case 1: rtName = "速推荐"; break;
-                case 2: rtName = "耐推荐"; break;
-                case 3: rtName = "根推荐"; break;
-                case 4: rtName = "力推荐"; break;
-                case 5: rtName = "智推荐"; break;
-                default: rtName = "推" + rt; break;
-            }
-            info.append("　").append(rtName);
-        }
-
-        // ★ Gauge gains — 试食会训练 gauge 进度
-        JSONArray gaugeGains = ramen.optJSONArray("gauge_gains");
-        if (gaugeGains != null && gaugeGains.length() > 0) {
-            StringBuilder ggStr = new StringBuilder();
-            for (int gi = 0; gi < gaugeGains.length(); gi++) {
-                JSONObject gg = gaugeGains.optJSONObject(gi);
-                if (gg == null) continue;
-                String gName = gg.optString("name", "");
-                int gVal = gg.optInt("gauge", 0);
-                if (gVal > 0) {
-                    if (ggStr.length() > 0) ggStr.append(" ");
-                    String shortName;
-                    switch (gName) {
-                        case "Speed": shortName = "速"; break;
-                        case "Stamina": shortName = "耐"; break;
-                        case "Power": shortName = "力"; break;
-                        case "Guts": shortName = "根"; break;
-                        case "Wiz": shortName = "智"; break;
-                        default: shortName = gName; break;
-                    }
-                    ggStr.append(shortName).append("+").append(gVal);
-                }
-            }
-            if (ggStr.length() > 0) {
-                info.append("\n减槽预览：").append(ggStr);
-            }
-        }
-
         String resourcePlan = RamenResourcePlanner.buildSummary(
                 ramen,
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_RESOURCES),
-                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_GAUGES));
-        String regionPlan = RamenRegionCombinationPlanner.buildSummary(
-                json,
-                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_REGIONS),
-                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_RESOURCES));
+                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_GAUGES),
+                RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_REGIONS));
         String checkpointPlan = RamenCheckpointPlanner.buildSummary(
                 json,
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_CHECKPOINTS),
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_ACTIONS));
         StringBuilder planInfo = new StringBuilder();
         if (!checkpointPlan.isEmpty()) planInfo.append(checkpointPlan);
-        if (!regionPlan.isEmpty()) {
-            if (planInfo.length() > 0) planInfo.append("\n");
-            planInfo.append(regionPlan);
-        }
         if (!resourcePlan.isEmpty()) {
             if (planInfo.length() > 0) planInfo.append("\n");
             planInfo.append(resourcePlan);
@@ -988,7 +922,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (i > 0) buffInfo.append("/");
                 int id = regionIds.optInt(i, 0);
                 String name = ramenRegionNameCache.get(id);
-                buffInfo.append(name == null ? "ID" + id : name + "#" + id);
+                buffInfo.append(name == null ? "编号" + id : name + "#" + id);
             }
         }
 
@@ -1161,13 +1095,13 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             String desc = b.optString("desc", "");
 
             if ("青".equals(name)) {
-                aoLevel = "Lv" + level;
+                aoLevel = "等级" + level;
                 aoDesc = desc;
             } else if ("緑".equals(name)) {
-                midoriLevel = "Lv" + level;
+                midoriLevel = "等级" + level;
                 midoriDesc = desc;
             } else if ("桃".equals(name)) {
-                momoLevel = "Lv" + level;
+                momoLevel = "等级" + level;
                 momoDesc = desc;
             }
         }
@@ -1215,7 +1149,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (region == null) continue;
                 int id = region.optInt("region_id", 0);
                 if (id <= 0) continue;
-                ramenRegionNameCache.put(id, region.optString("name_ja", "地区" + id));
+                ramenRegionNameCache.put(id, chineseRegionName(region.optString("name_ja", "地区" + id)));
                 JSONArray effects = region.optJSONArray("effects");
                 if (effects == null) continue;
                 for (int j = 0; j < effects.length(); j++) {
@@ -1231,6 +1165,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         } catch (Exception e) {
             Log.w(TAG, "Ramen region catalog parse failed: " + e.getMessage());
         }
+    }
+
+
+    private static String chineseRegionName(String name) {
+        return name.replace("館", "馆").replace("島", "岛")
+                .replace("東", "东").replace("倉", "仓");
     }
 
     private String stripRamenMarkup(String text) {
@@ -1262,10 +1202,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             case 3: label = "羁绊"; break;
             case 5: case 10: label = "友情加成"; unit = "%"; break;
             case 7: case 12: label = "属性单次上限"; break;
-            case 8: case 13: label = "技能Pt单次上限"; break;
-            case 14: return "全编成支援Hint事件发生";
-            case 15: return "所选训练全部Hint效果发动";
-            default: return "吃面效果(ID" + effectId + ",值" + value + ")";
+            case 8: case 13: label = "技能点单次上限"; break;
+            case 14: return "全编成支援卡提示事件发生";
+            case 15: return "所选训练全部提示效果发动";
+            default: return "吃面效果(编号" + effectId + ",值" + value + ")";
         }
         return label + (value >= 0 ? "+" + value + unit : "");
     }
@@ -1275,11 +1215,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         ensureRamenCatalogs();
         JSONObject effect = ramenEffectRecordCache.get(effectRecordId);
         if (effect == null) {
-            return "地区效果(ID" + effectRecordId + ",值" + value + ")";
+            return "地区效果(编号" + effectRecordId + ",值" + value + ")";
         }
         String name = effect.optString("region_name_ja", "地区");
         String template = stripRamenMarkup(effect.optString("display_template", ""));
-        if (template.isEmpty()) return name + "(效果ID" + effectRecordId + ",值" + value + ")";
+        if (template.isEmpty()) return name + "(效果编号" + effectRecordId + ",值" + value + ")";
         template = template.replace("{0}", String.valueOf(value));
         return name + ":" + template;
     }
@@ -1291,8 +1231,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         int category = ramenCategory(effect, rawName);
         if (category == 1) return resolveRamenRegionEffect(effectId, value);
         if (category == 2) return resolveRamenActionEffect(effectId, value);
-        if (category == 4) return "特殊效果(ID" + effectId + ",值" + value + ")";
-        return "未解析效果(类别" + category + ",ID" + effectId + ",值" + value + ")";
+        if (category == 4) return "特殊效果(编号" + effectId + ",值" + value + ")";
+        return "未解析效果(类别" + category + ",编号" + effectId + ",值" + value + ")";
     }
 
     /**
@@ -1492,7 +1432,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             String type = b.optString("type", "");
             String desc = b.optString("desc", "");
 
-            String label = level > 0 ? name + "Lv" + level : name;
+            String label = level > 0 ? name + "等级" + level : name;
 
             if ("Good".equals(type)) {
                 if (goodBuffs.length() > 0) goodBuffs.append(" ");
@@ -1672,7 +1612,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 if (isSupportCard || isFixedBondNpc) one.append(" 羁绊").append(bond >= 0 ? bond : "?");
                 if (isSupportCard && isShining) one.append(" 彩圈");
                 else if (isSupportCard && !shiningKnown) one.append(" 彩圈?");
-                if (isSupportCard && isHint) one.append(" Hint");
+                if (isSupportCard && isHint) one.append(" 提示");
                 if (partnerStr.length() > 0) partnerStr.append("\n");
                 partnerStr.append(one);
             }
@@ -1741,7 +1681,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         for (int i = 0; i < lvViews.length; i++) {
             if (lvViews[i] != null) {
                 if (levels[i] > 1) {
-                    lvViews[i].setText("Lv" + levels[i]);
+                    lvViews[i].setText("等级" + levels[i]);
                     lvViews[i].setVisibility(View.VISIBLE);
                 } else {
                     lvViews[i].setVisibility(View.GONE);
@@ -1756,7 +1696,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             httpServer = new HttpDataService(this);
             httpServer.startServer();
             Log.d(TAG, "HTTP server started on port " + HttpDataService.PORT);
-            updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
+            updateNotification("本地通信：" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
         } catch (Exception e) {
             Log.e(TAG, "HTTP server start failed: " + e.getMessage(), e);
         }
@@ -1871,7 +1811,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         int saddleCount = json.optInt("saddle_count", 0);
 
         sb.append("出走").append(totalRaces).append(" 勝").append(winCount)
-          .append(" G1勝鞍").append(saddleCount).append("\n");
+          .append(" 一级赛胜鞍").append(saddleCount).append("\n");
 
         // 当前马胜鞍
         JSONArray winSaddles = json.optJSONArray("win_saddles");
@@ -1961,7 +1901,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 }
             }
             if (rgStr.length() > 0) {
-                sb.append("MDB相性表: ").append(rgStr);
+                sb.append("数据库相性表：").append(rgStr);
             }
         }
 
@@ -2047,8 +1987,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             StringBuilder sb = new StringBuilder();
             int reqCount = (reqs != null) ? reqs.length() : 0;
             int respCount = (resps != null) ? resps.length() : 0;
-            sb.append("PKT ").append(reqCount).append("req/").append(respCount)
-              .append("resp\n");
+            sb.append("抓包：请求").append(reqCount).append("条/响应").append(respCount)
+              .append("条\n");
 
             // 显示最近的请求（最多5条）
             if (reqs != null && reqCount > 0) {
@@ -2074,7 +2014,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         }
                         sb.append(decoded).append("\n");
                     } else if (text != null && !text.isEmpty() && text.length() < 200) {
-                        sb.append("  txt:").append(text.substring(0, Math.min(text.length(), 100)));
+                        sb.append("  文本：").append(text.substring(0, Math.min(text.length(), 100)));
                         sb.append("\n");
                     }
                 }
@@ -2357,7 +2297,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private Notification createNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("赛马娘助手")
-                .setContentText("HTTP:18766 | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送")
+                .setContentText("本地通信：18766 | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送")
                 .setSmallIcon(android.R.drawable.ic_menu_agenda)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
@@ -2508,7 +2448,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         if (endpointDumper.isDumping()) {
                             endpointDumper.cancel();
                             final TextView btn = (TextView) v;
-                            btn.setText("DUMP");
+                            btn.setText("完整调试");
                             return;
                         }
                         // ★ 视觉反馈：按钮变色+改字
@@ -2520,7 +2460,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                             @Override
                             public void onDumpComplete(int ok, int fail, String fails) {
                                 handler.post(() -> {
-                                    btn.setText("DUMP");
+                                    btn.setText("完整调试");
                                     btn.setTextColor(origColor);
                                 });
                             }
@@ -2659,7 +2599,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         selectedScenario = scenario;
                         Log.d(TAG, "Scenario changed via broadcast: " + scenario);
                         updateScenarioLabel();
-                        updateNotification("HTTP:" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
+                        updateNotification("本地通信：" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
                     }
                 } else if (ACTION_UPLOAD_DATA.equals(action)) {
                     // 手动上传当前育成数据
@@ -2667,7 +2607,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         int finalized = dataCollector.finalizeAndUpload();
                         Log.d(TAG, "Manual upload requested, turns: " + finalized);
                         Toast.makeText(FloatingWindowService.this,
-                            finalized + "回合数据上传中...",
+                            "已封存" + finalized + "回合，正在上传…",
                             Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(FloatingWindowService.this,

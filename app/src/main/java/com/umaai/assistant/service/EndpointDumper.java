@@ -91,7 +91,7 @@ public class EndpointDumper {
     public void cancel() {
         if (dumping) {
             cancelled = true;
-            showToast("Dump取消中...");
+            showToast("正在取消全量抓取…");
         }
     }
 
@@ -151,12 +151,12 @@ public class EndpointDumper {
                     if (!uploadToGitHub(payload.toString(2), remotePath,
                             "upload ramen evidence " + scenarioDir)) {
                         failCount++;
-                        failNames.append("github ");
+                        failNames.append("上传 ");
                     }
                 }
             } catch (Exception e) {
                 failCount++;
-                failNames.append("payload ");
+                failNames.append("数据整理 ");
                 Log.e(TAG, "Ramen snapshot error: " + e.getMessage());
             }
 
@@ -167,7 +167,7 @@ public class EndpointDumper {
             handler().post(() -> {
                 String msg = fail == 0
                         ? "拉面快照上传成功（" + ok + "端点）"
-                        : "拉面快照 " + ok + "OK/" + fail + "NG: " + fails.trim();
+                        : "拉面快照：成功" + ok + "项/失败" + fail + "项：" + fails.trim();
                 Toast.makeText(context, msg,
                         fail > 0 ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
                 if (callback != null) callback.onDumpComplete(ok, fail, fails);
@@ -186,14 +186,14 @@ public class EndpointDumper {
      */
     public void dumpAll(String scenario, DumpCallback callback) {
         if (dumping) {
-            showToast("Dump中...");
+            showToast("正在全量抓取…");
             return;
         }
         dumping = true;
         cancelled = false;
         String scenarioDir = (scenario != null && !scenario.isEmpty()) ? scenario : "Unknown";
 
-        showToast("Dump開始 (" + ENDPOINTS.length + "端点)...");
+        showToast("开始全量抓取（" + ENDPOINTS.length + "项）…");
 
         new Thread(() -> {
             long startTime = System.currentTimeMillis();
@@ -212,7 +212,7 @@ public class EndpointDumper {
                 // ★ 检查总超时
                 if (System.currentTimeMillis() - startTime > TOTAL_TIMEOUT_MS) {
                     Log.w(TAG, "Dump total timeout exceeded");
-                    failNames.append("(timeout) ");
+                    failNames.append("(超时) ");
                     break;
                 }
 
@@ -276,11 +276,11 @@ public class EndpointDumper {
             handler().post(() -> {
                 String msg;
                 if (wasCancelled) {
-                    msg = "Dump取消! " + ok + "OK/" + fail + "NG";
+                    msg = "全量抓取已取消：成功" + ok + "项/失败" + fail + "项";
                 } else if (fail == 0) {
-                    msg = "Dump完了! " + ok + "端点上传成功";
+                    msg = "全量抓取完成：" + ok + "项上传成功";
                 } else {
-                    msg = "Dump " + ok + "OK/" + fail + "NG 失敗:" + fails.trim();
+                    msg = "全量抓取：成功" + ok + "项/失败" + fail + "项：" + fails.trim();
                 }
                 Toast.makeText(context, msg,
                     fail > 0 || wasCancelled ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();

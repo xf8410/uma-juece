@@ -25,7 +25,7 @@ public final class RamenCheckpointPlanner {
                 if (candidate == null || candidate.optInt("turn", -1) < turn) continue;
                 if (next == null || candidate.optInt("turn") < next.optInt("turn")) next = candidate;
             }
-            if (next == null) return "RMJ：检查点已结束";
+            if (next == null) return "拉面大赛：检查点已结束";
 
             int checkpointTurn = next.optInt("turn");
             int stage = checkpointTurn == 24 ? 1 : checkpointTurn == 48 ? 2 : 3;
@@ -42,22 +42,17 @@ public final class RamenCheckpointPlanner {
             int shortfall = Math.max(0, success - point);
             int bowls = (shortfall + basePoint - 1) / basePoint;
 
-            StringBuilder out = new StringBuilder("RMJ T").append(checkpointTurn)
-                    .append("：").append(point).append("/").append(success);
-            if (shortfall == 0) out.append(" 已达成功线");
-            else out.append(" 缺").append(shortfall)
-                    .append("，至少").append(bowls).append("碗")
-                    .append("(基础+").append(basePoint).append("/碗)");
+            StringBuilder out = new StringBuilder("拉面大赛 第").append(checkpointTurn).append("回合：");
+            if (shortfall == 0) out.append("已达目标");
+            else out.append("还差").append(shortfall).append("点，至少再吃").append(bowls).append("碗");
 
             int great = next.optInt("great_success_pt", 0);
             if (great > 0) {
                 int greatShortfall = Math.max(0, great - point);
                 int greatBowls = (greatShortfall + basePoint - 1) / basePoint;
-                if (greatShortfall == 0) out.append("；已达大成功线");
-                else out.append("；大成功缺").append(greatShortfall)
-                        .append("/至少").append(greatBowls).append("碗");
+                if (greatShortfall == 0) out.append("；已达大成功目标");
+                else out.append("；大成功至少再吃").append(greatBowls).append("碗");
             }
-            out.append("（仅基础盛况Pt，不含资源/行动预测）");
             return out.toString();
         } catch (Exception ignored) {
             return "";

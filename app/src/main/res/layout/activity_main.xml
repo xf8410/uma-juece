@@ -11,7 +11,7 @@
         android:layout_height="wrap_content"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="40dp"
-        android:text="uma-juece 小黑板"
+        android:text="赛马娘决策小黑板"
         android:textColor="#00FF88"
         android:textSize="20sp"
         android:textStyle="bold" />
@@ -65,7 +65,7 @@
         android:id="@+id/btn_test_http"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="测试HTTP通信"
+        android:text="测试本地通信"
         android:layout_below="@+id/btn_test_fake"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="12dp" />
@@ -95,13 +95,13 @@
             android:layout_weight="1"
             android:textColor="#88CC88"
             android:textSize="12sp"
-            android:text="数据采集: 待机中" />
+            android:text="自动采集：待机中" />
 
         <Button
             android:id="@+id/btn_upload_data"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="手動UP"
+            android:text="上传本局记录"
             android:textSize="11sp"
             android:padding="4dp" />
 
@@ -116,6 +116,6 @@
         android:layout_marginTop="20dp"
         android:textColor="#888888"
         android:textSize="14sp"
-        android:text="HTTP服务: 未启动" />
+        android:text="本地通信：未启动" />
 
 </RelativeLayout>

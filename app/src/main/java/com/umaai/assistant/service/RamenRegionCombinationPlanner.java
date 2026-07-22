@@ -61,7 +61,7 @@ public final class RamenRegionCombinationPlanner {
                                                JSONObject catalog) {
         JSONArray runtime = ramen.optJSONArray("selectable_region_ids");
         if (runtime != null && runtime.length() >= 3) {
-            return new CandidatePool(uniqueInts(runtime), "runtime");
+            return new CandidatePool(uniqueInts(runtime), "实时数据");
         }
         int turn = summary.optInt("turn", -1);
         int selectType = -1;
@@ -75,7 +75,7 @@ public final class RamenRegionCombinationPlanner {
                 }
             }
         }
-        if (selectType < 0) return new CandidatePool(Collections.emptyList(), "none");
+        if (selectType < 0) return new CandidatePool(Collections.emptyList(), "无");
         List<Integer> ids = new ArrayList<>();
         JSONArray rows = catalog.optJSONArray("regions");
         if (rows != null) {
@@ -86,7 +86,7 @@ public final class RamenRegionCombinationPlanner {
                 }
             }
         }
-        return new CandidatePool(ids, "master阶段回退");
+        return new CandidatePool(ids, "阶段目录回退");
     }
 
     private static Map<Integer, Region> readRegions(JSONObject catalog, JSONObject resources) {
@@ -109,7 +109,7 @@ public final class RamenRegionCombinationPlanner {
             int id = row.optInt("region_id", -1);
             int[] cost = costs.get(id);
             if (id > 0 && cost != null) result.put(id, new Region(id,
-                    row.optString("name_ja", "ID" + id), cost));
+                    row.optString("name_ja", "编号" + id), cost));
         }
         return result;
     }

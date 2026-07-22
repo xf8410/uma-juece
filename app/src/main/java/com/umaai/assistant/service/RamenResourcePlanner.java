@@ -23,8 +23,9 @@ public final class RamenResourcePlanner {
     private RamenResourcePlanner() {}
 
     public static String buildSummary(JSONObject ramen, String resourceCatalogRaw,
-                                      String gaugeCatalogRaw) {
-        if (ramen == null || resourceCatalogRaw == null || gaugeCatalogRaw == null) return "";
+                                      String gaugeCatalogRaw, String regionCatalogRaw) {
+        if (ramen == null || resourceCatalogRaw == null || gaugeCatalogRaw == null
+                || regionCatalogRaw == null) return "";
         try {
             JSONObject resources = new JSONObject(resourceCatalogRaw);
             JSONObject gauges = new JSONObject(gaugeCatalogRaw);
@@ -33,49 +34,34 @@ public final class RamenResourcePlanner {
                     .getJSONObject("inventory").getInt("shared_capacity");
             if (threshold <= 0 || capacity <= 0) return "";
 
-            List<Recipe> recipes = readSelectedRecipes(resources, ramen.optJSONArray("selected_region_ids"));
+            List<Recipe> recipes = readSelectedRecipes(resources, new JSONObject(regionCatalogRaw),
+                    ramen.optJSONArray("selected_region_ids"));
+            if (recipes.isEmpty()) return "";
             int special = Math.max(0, ramen.optInt("special_feeling_num", 0));
             List<Integer> queue = readInventoryQueue(ramen);
-            int[] counts = countQueue(queue);
-
-            StringBuilder out = new StringBuilder("资源规划（不含训练价值）\n");
-            appendRecipeState(out, "当前：", recipes, counts, special);
+            List<Recipe> current = feasibleRecipes(recipes, countQueue(queue), special);
+            if (!current.isEmpty()) return "现在可吃：" + formatRecipes(current);
 
             Map<Integer, Integer> currentRemaining = readCurrentRemaining(
                     ramen.optJSONArray("acquisition_gauges"));
-            Map<Integer, Integer> linkedFeeling = readCommandFeelings(
-                    ramen.optJSONArray("command_feelings"));
             JSONArray vectors = ramen.optJSONArray("command_gauge_vectors");
             if (vectors == null || vectors.length() == 0 || currentRemaining.size() < 3) {
-                out.append("\n缺少运行时最终减槽向量/当前槽，暂不推演训练后库存");
-                return out.toString();
+                return "暂时不能吃面";
             }
 
-            int shown = 0;
-            for (int i = 0; i < vectors.length() && shown < 5; i++) {
+            for (int i = 0; i < vectors.length(); i++) {
                 JSONObject vector = vectors.optJSONObject(i);
                 if (vector == null) continue;
                 int commandId = vector.optInt("command_id", -1);
                 JSONArray progress = vector.optJSONArray("progress");
                 if (commandId < 0 || progress == null) continue;
-
                 Projection projection = project(queue, currentRemaining, progress, threshold, capacity);
-                out.append("\n").append(commandName(commandId)).append("：");
-                Integer linked = linkedFeeling.get(commandId);
-                if (linked != null && linked >= 1 && linked <= 3) {
-                    out.append("→").append(FEELING_NAMES[linked]);
+                List<Recipe> after = feasibleRecipes(recipes, countQueue(projection.queue), special);
+                if (!after.isEmpty()) {
+                    return "建议：先" + commandName(commandId) + "训，再吃" + after.get(0).name + "面";
                 }
-                out.append(" 减槽").append(formatVector(projection.reductions));
-                if (projection.gained.isEmpty()) {
-                    out.append(" 无新诀窍");
-                } else {
-                    out.append(" 得").append(formatFeelings(projection.gained));
-                    if (projection.evicted > 0) out.append(" FIFO顶旧").append(projection.evicted);
-                }
-                appendRecipeState(out, "；训练后：", recipes, countQueue(projection.queue), special);
-                shown++;
             }
-            return out.toString();
+            return "暂时不能吃面";
         } catch (Exception ignored) {
             return "";
         }
@@ -170,7 +156,17 @@ public final class RamenResourcePlanner {
         return new Projection(queue, gained, reductions, evicted);
     }
 
-    private static List<Recipe> readSelectedRecipes(JSONObject resources, JSONArray selected) {
+    private static List<Recipe> readSelectedRecipes(JSONObject resources, JSONObject regions,
+                                                     JSONArray selected) {
+        Map<Integer, String> names = new HashMap<>();
+        JSONArray regionRows = regions.optJSONArray("regions");
+        if (regionRows != null) {
+            for (int i = 0; i < regionRows.length(); i++) {
+                JSONObject row = regionRows.optJSONObject(i);
+                if (row != null) names.put(row.optInt("region_id", -1),
+                        chineseRegionName(row.optString("name_ja", "地区")));
+            }
+        }
         Map<Integer, Recipe> all = new HashMap<>();
         JSONArray rows = resources.optJSONArray("recipes");
         if (rows != null) {
@@ -180,8 +176,8 @@ public final class RamenResourcePlanner {
                 JSONObject cost = row.optJSONObject("cost");
                 if (cost == null) continue;
                 int id = row.optInt("region_id", -1);
-                all.put(id, new Recipe(id, new int[]{0, cost.optInt("1"),
-                        cost.optInt("2"), cost.optInt("3")}));
+                all.put(id, new Recipe(id, names.getOrDefault(id, "地区" + id),
+                        new int[]{0, cost.optInt("1"), cost.optInt("2"), cost.optInt("3")}));
             }
         }
         List<Recipe> result = new ArrayList<>();
@@ -194,25 +190,25 @@ public final class RamenResourcePlanner {
         return result;
     }
 
-    private static void appendRecipeState(StringBuilder out, String prefix, List<Recipe> recipes,
-                                          int[] counts, int special) {
-        if (recipes.isEmpty()) {
-            out.append(prefix).append("无已选地区配方");
-            return;
-        }
-        List<String> feasible = new ArrayList<>();
+    private static List<Recipe> feasibleRecipes(List<Recipe> recipes, int[] counts, int special) {
+        List<Recipe> result = new ArrayList<>();
         for (Recipe recipe : recipes) {
-            int substitutions = 0;
-            for (int id = 1; id <= 3; id++) {
-                substitutions += Math.max(0, recipe.cost[id] - counts[id]);
-            }
-            if (substitutions <= Math.min(2, special)) {
-                feasible.add("#" + recipe.regionId + (substitutions > 0 ? "(万能" + substitutions + ")" : ""));
-            }
+            int missing = 0;
+            for (int id = 1; id <= 3; id++) missing += Math.max(0, recipe.cost[id] - counts[id]);
+            if (missing <= Math.min(2, special)) result.add(recipe);
         }
-        out.append(prefix).append("可做 ");
-        if (feasible.isEmpty()) out.append("无");
-        else out.append(String.join("/", feasible));
+        return result;
+    }
+
+    private static String formatRecipes(List<Recipe> recipes) {
+        List<String> names = new ArrayList<>();
+        for (Recipe recipe : recipes) names.add(recipe.name + "面");
+        return String.join("/", names);
+    }
+
+    private static String chineseRegionName(String name) {
+        return name.replace("館", "馆").replace("島", "岛")
+                .replace("東", "东").replace("倉", "仓");
     }
 
     private static int[] countQueue(List<Integer> queue) {
@@ -264,8 +260,11 @@ public final class RamenResourcePlanner {
 
     private static final class Recipe {
         final int regionId;
+        final String name;
         final int[] cost;
-        Recipe(int regionId, int[] cost) { this.regionId = regionId; this.cost = cost; }
+        Recipe(int regionId, String name, int[] cost) {
+            this.regionId = regionId; this.name = name; this.cost = cost;
+        }
     }
 
     private static final class Projection {

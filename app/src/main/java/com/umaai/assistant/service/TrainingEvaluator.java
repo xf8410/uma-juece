@@ -649,7 +649,7 @@ public class TrainingEvaluator {
         if (trData != null) {
             int level = getTrainLevel(trainLevels, trainIdx);
             if (level > 1) {
-                sb.append("Lv").append(level);
+                sb.append("等级").append(level);
             }
 
             JSONObject gains = trData.optJSONObject("gains");
@@ -664,12 +664,12 @@ public class TrainingEvaluator {
                 }
                 int pt = gains.optInt(GAIN_PT_KEY, 0);
                 if (pt > 0) {
-                    sb.append(" Pt+").append(pt);
+                    sb.append(" 技能点+").append(pt);
                 }
             }
             int fail = trData.optInt("failure_rate", 0);
             if (fail > 0) {
-                sb.append(" 失敗").append(fail).append("%");
+                sb.append(" 失败率").append(fail).append("%");
             }
             int shining = trData.optInt("shining", 0);
             if (shining > 0) {

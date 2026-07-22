@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
 
     // 剧本列表：中文显示名 → 内部标识（按实装顺序，共13个）
     public static final String[] SCENARIO_LABELS = {
-        "URA",
+        "URA总决赛",
         "青春杯",
         "巅峰杯",
         "偶像杯",
@@ -157,7 +157,7 @@ public class MainActivity extends Activity {
             // 通知浮窗服务上传当前数据
             Intent uploadIntent = new Intent(FloatingWindowService.ACTION_UPLOAD_DATA);
             sendBroadcast(uploadIntent);
-            Toast.makeText(this, "上传请求已发送", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已请求封存当前记录并上传", Toast.LENGTH_SHORT).show();
         });
 
         // 启动时加载数据
@@ -185,7 +185,7 @@ public class MainActivity extends Activity {
     private void loadDataIfNeeded() {
         if (RemoteDataLoader.isCached(this)) {
             SharedPreferences prefs = getSharedPreferences(RemoteDataLoader.PREFS_NAME, MODE_PRIVATE);
-            tvStatus.setText("数据已缓存 ✓\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+            tvStatus.setText("数据已缓存 ✓\n本地通信：127.0.0.1:" + HttpDataService.PORT);
             return;
         }
 
@@ -193,10 +193,10 @@ public class MainActivity extends Activity {
         RemoteDataLoader.loadAll(this, success -> {
             runOnUiThread(() -> {
                 if (success) {
-                    tvStatus.setText("数据加载成功 ✓\n813角色 / 8063事件 / 2008技能\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+                    tvStatus.setText("数据加载成功 ✓\n813角色 / 8063事件 / 2008技能\n本地通信：127.0.0.1:" + HttpDataService.PORT);
                     Toast.makeText(this, "游戏数据加载完成", Toast.LENGTH_SHORT).show();
                 } else {
-                    tvStatus.setText("数据加载失败，使用离线模式\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+                    tvStatus.setText("数据加载失败，使用离线模式\n本地通信：127.0.0.1:" + HttpDataService.PORT);
                     Toast.makeText(this, "数据加载失败，将使用离线模式", Toast.LENGTH_LONG).show();
                 }
             });
@@ -213,7 +213,7 @@ public class MainActivity extends Activity {
             startService(intent);
         }
         Toast.makeText(this, "小黑板已启动", Toast.LENGTH_SHORT).show();
-        tvStatus.setText("HTTP服务: 127.0.0.1:" + HttpDataService.PORT);
+        tvStatus.setText("本地通信：127.0.0.1:" + HttpDataService.PORT);
     }
 
     public String getSelectedScenario() {
@@ -227,26 +227,26 @@ public class MainActivity extends Activity {
                 String status = httpGet("http://127.0.0.1:" + HttpDataService.PORT + "/status");
                 if (status != null) {
                     runOnUiThread(() -> {
-                        tvStatus.setText("HTTP服务: 在线\n" + status);
-                        Toast.makeText(this, "HTTP服务在线!", Toast.LENGTH_SHORT).show();
+                        tvStatus.setText("本地通信：在线\n" + status);
+                        Toast.makeText(this, "本地通信正常", Toast.LENGTH_SHORT).show();
                     });
 
                     Thread.sleep(500);
                     String pushResult = httpGet(
                             "http://127.0.0.1:" + HttpDataService.PORT
-                                    + "/data?msg=HTTP通信测试成功!");
+                                    + "/data?msg=本地通信测试成功");
                     if (pushResult != null) {
                         runOnUiThread(() ->
-                                Toast.makeText(this, "数据已通过HTTP推送到浮窗", Toast.LENGTH_SHORT).show());
+                                Toast.makeText(this, "测试数据已推送到浮窗", Toast.LENGTH_SHORT).show());
                     }
                 } else {
                     runOnUiThread(() -> {
-                        tvStatus.setText("HTTP服务: 离线\n请先启动悬浮窗");
-                        Toast.makeText(this, "HTTP服务未启动", Toast.LENGTH_SHORT).show();
+                        tvStatus.setText("本地通信：离线\n请先启动悬浮窗");
+                        Toast.makeText(this, "本地通信未启动", Toast.LENGTH_SHORT).show();
                     });
                 }
             } catch (Exception e) {
-                runOnUiThread(() -> tvStatus.setText("HTTP测试失败: " + e.getMessage()));
+                runOnUiThread(() -> tvStatus.setText("本地通信测试失败：" + e.getMessage()));
             }
         }).start();
     }
@@ -282,7 +282,7 @@ public class MainActivity extends Activity {
 
     private void updateStatus() {
         if (RemoteDataLoader.isCached(this)) {
-            tvStatus.setText("数据已缓存 ✓\nHTTP: 127.0.0.1:" + HttpDataService.PORT);
+            tvStatus.setText("数据已缓存 ✓\n本地通信：127.0.0.1:" + HttpDataService.PORT);
         }
     }
 }

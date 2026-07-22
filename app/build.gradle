@@ -23,8 +23,8 @@ android {
         applicationId "com.umaai.assistant"
         minSdk 26
         targetSdk 34
-        versionCode 13200
-        versionName "1.32"
+        versionCode 13300
+        versionName "1.33"
 
         // Inject GitHub token at build time — not in source code
         // ★ 安全警告: Token 编译进 APK 可被反编译提取

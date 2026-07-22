@@ -377,7 +377,7 @@
             android:layout_weight="1"
             android:textColor="#555555"
             android:textSize="8sp"
-            android:text="Hook:---" />
+            android:text="插件：---" />
 
         <TextView
             android:id="@+id/btn_debug_log"
@@ -385,7 +385,7 @@
             android:layout_height="wrap_content"
             android:textColor="#666666"
             android:textSize="8sp"
-            android:text="拉面"
+            android:text="拉面证据"
             android:paddingStart="6dp"
             android:paddingEnd="4dp"
             android:clickable="true"
@@ -396,7 +396,7 @@
             android:layout_height="wrap_content"
             android:textColor="#666666"
             android:textSize="8sp"
-            android:text="DUMP"
+            android:text="完整调试"
             android:paddingStart="6dp"
             android:paddingEnd="4dp"
             android:clickable="true"
@@ -407,7 +407,7 @@
             android:layout_height="wrap_content"
             android:textColor="#BB88FF"
             android:textSize="8sp"
-            android:text="鞍"
+            android:text="胜鞍"
             android:paddingStart="6dp"
             android:paddingEnd="2dp"
             android:clickable="true"
@@ -418,7 +418,7 @@
             android:layout_height="wrap_content"
             android:textColor="#FF8800"
             android:textSize="8sp"
-            android:text="PKT"
+            android:text="抓包"
             android:paddingStart="6dp"
             android:paddingEnd="2dp"
             android:clickable="true"
@@ -429,7 +429,7 @@
             android:layout_height="wrap_content"
             android:textColor="#00FFAA"
             android:textSize="8sp"
-            android:text="EVT"
+            android:text="事件"
             android:paddingStart="6dp"
             android:paddingEnd="2dp"
             android:clickable="true"
@@ -484,7 +484,7 @@
             android:textSize="7sp"
             android:fontFamily="monospace"
             android:lineSpacingExtra="0dp"
-            android:text="点PKT开始抓包" />
+            android:text="点“抓包”开始" />
     </LinearLayout>
 
     <!-- 事件推荐面板（默认隐藏，点「EVT」按钮展开） -->
