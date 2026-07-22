@@ -214,6 +214,20 @@
         </LinearLayout>
     </LinearLayout>
 
+
+    <!-- 拉面资源/地区规划：与顶部状态分离，避免长文本挤占训练信息 -->
+    <TextView
+        android:id="@+id/tv_ramen_plan"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#AA8855"
+        android:textSize="7sp"
+        android:lineSpacingExtra="1dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="1dp"
+        android:text=""
+        android:visibility="gone" />
+
     <!-- 分隔线 -->
     <View
         android:layout_width="match_parent"

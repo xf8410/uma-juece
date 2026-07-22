@@ -117,6 +117,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private TextView tvRaceStatus;
     // 拉面杯 Gauge 状态栏
     private TextView tvRamenGauge;
+    private TextView tvRamenPlan;
     // turn_config 缓存（从 /log/turn 拉取一次）
     private JSONArray turnConfigCache = null;
     private long turnConfigCacheTime = 0;
@@ -503,6 +504,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     updateRamenInfo(json);
                 } else {
                     if (tvRamenGauge != null) tvRamenGauge.setVisibility(View.GONE);
+                    if (tvRamenPlan != null) tvRamenPlan.setVisibility(View.GONE);
                 }
 
                 // ★ 队员显示（育马者杯）
@@ -834,6 +836,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         JSONObject ramen = json.optJSONObject("ramen");
         if (ramen == null) {
             if (tvRamenGauge != null) tvRamenGauge.setVisibility(View.GONE);
+            if (tvRamenPlan != null) tvRamenPlan.setVisibility(View.GONE);
             return;
         }
 
@@ -943,26 +946,30 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 ramen,
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_RESOURCES),
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_GAUGES));
-        if (!resourcePlan.isEmpty()) {
-            if (info.length() > 0) info.append("\n");
-            info.append(resourcePlan);
-        }
-
         String regionPlan = RamenRegionCombinationPlanner.buildSummary(
                 json,
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_REGIONS),
                 RemoteDataLoader.getCachedData(this, RemoteDataLoader.KEY_RAMEN_RESOURCES));
-        if (!regionPlan.isEmpty()) {
-            if (info.length() > 0) info.append("\n");
-            info.append(regionPlan);
+        StringBuilder planInfo = new StringBuilder();
+        if (!regionPlan.isEmpty()) planInfo.append(regionPlan);
+        if (!resourcePlan.isEmpty()) {
+            if (planInfo.length() > 0) planInfo.append("\n");
+            planInfo.append(resourcePlan);
         }
 
-        // Display in ramen gauge status bar
+        // Keep the compact current-state line above training columns. Long planning
+        // details live in their own lower-priority block so they cannot crowd it.
         if (tvRamenGauge != null && info.length() > 0) {
             tvRamenGauge.setText(info.toString().trim());
             tvRamenGauge.setVisibility(View.VISIBLE);
         } else if (tvRamenGauge != null) {
             tvRamenGauge.setVisibility(View.GONE);
+        }
+        if (tvRamenPlan != null && planInfo.length() > 0) {
+            tvRamenPlan.setText(planInfo.toString().trim());
+            tvRamenPlan.setVisibility(View.VISIBLE);
+        } else if (tvRamenPlan != null) {
+            tvRamenPlan.setVisibility(View.GONE);
         }
 
         // 地区必须按 Region ID 显示；第三阶段同名地区仍是独立效果。
@@ -1623,8 +1630,14 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 // Scenario 14 has three distinct participant layers:
                 // equipped support cards; fixed bond NPCs (director/reporter);
                 // and scenario partners whose gauges are not support-card bonds.
-                boolean isFixedBondNpc = "Ramen".equals(currentScenario)
-                        && (partnerId == 102 || partnerId == 103);
+                int mappedCharaId = ramenPartnerCharaCache.getOrDefault(partnerId, 0);
+                // Prefer the stable chara IDs; keep partner 102/103 only as a
+                // Scenario 14 compatibility fallback for older plugin payloads.
+                boolean isDirector = mappedCharaId == 9002
+                        || ("Ramen".equals(currentScenario) && partnerId == 102);
+                boolean isReporter = mappedCharaId == 9003
+                        || ("Ramen".equals(currentScenario) && partnerId == 103);
+                boolean isFixedBondNpc = !isSupportCard && (isDirector || isReporter);
                 if (isSupportCard) {
                     pName = supportCardNameCache.getOrDefault(supportCardId, "");
                     if (pName.isEmpty()) {
@@ -1634,10 +1647,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     if (pName.isEmpty()) pName = "支援卡" + supportCardId;
                     displayType = supportCardTypeCache.getOrDefault(supportCardId, "?");
                 } else {
-                    int charaId = ramenPartnerCharaCache.getOrDefault(partnerId, 0);
+                    int charaId = mappedCharaId;
                     if (charaId == 0 && npcNameCache.containsKey(partnerId)) charaId = partnerId;
                     pName = charaId > 0 ? npcNameCache.getOrDefault(charaId, "") : "";
-                    if (charaId == 9002) pName = "理";
+                    if (isDirector) pName = "理";
+                    else if (isReporter && pName.isEmpty()) pName = "记者";
                     if (pName.isEmpty()) {
                         String soName = p.optString("name", "");
                         if (!soName.isEmpty() && !soName.startsWith("伙伴")
@@ -2425,6 +2439,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             // 比赛/目标状态栏 + 拉面杯 Gauge
             tvRaceStatus = floatingView.findViewById(R.id.tv_race_status);
             tvRamenGauge = floatingView.findViewById(R.id.tv_ramen_gauge);
+            tvRamenPlan = floatingView.findViewById(R.id.tv_ramen_plan);
 
             // ★ 初始化剧本标签
             updateScenarioLabel();
