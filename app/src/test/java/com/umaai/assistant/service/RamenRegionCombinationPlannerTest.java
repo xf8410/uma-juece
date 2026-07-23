@@ -38,13 +38,15 @@ public class RamenRegionCombinationPlannerTest {
                 + ramenFields + "}}";
     }
 
-    private static String plan(String summaryJson, String resources) {
+    // throws Exception: Android's org.json.JSONException is checked; harmless
+    // when the Maven org.json (unchecked) wins the test classpath.
+    private static String plan(String summaryJson, String resources) throws Exception {
         return RamenRegionCombinationPlanner.buildSummary(
                 new JSONObject(summaryJson), regionCatalog(), resources);
     }
 
     @Test
-    public void normalInventoryIsConsumedAcrossBowls() {
+    public void normalInventoryIsConsumedAcrossBowls() throws Exception {
         // 5 in stock, every bowl costs 5 of type 1: solo 3, in-a-row only 1.
         String out = plan(summary("\"sozai\":[5,0,0],\"special_feeling_num\":0"),
                 resourceCatalog(5, 5, 5, 5, 5));
@@ -53,7 +55,7 @@ public class RamenRegionCombinationPlannerTest {
     }
 
     @Test
-    public void universalStockIsConsumedAcrossBowls() {
+    public void universalStockIsConsumedAcrossBowls() throws Exception {
         // special=2, every bowl missing 2: only one bowl coverable in a row.
         String out = plan(summary("\"sozai\":[0,0,0],\"special_feeling_num\":2"),
                 resourceCatalog(2, 2, 2, 2, 2));
@@ -62,14 +64,14 @@ public class RamenRegionCombinationPlannerTest {
     }
 
     @Test
-    public void derivedPoolIsConsumedWithMatchingSource() {
+    public void derivedPoolIsConsumedWithMatchingSource() throws Exception {
         String out = plan(summary("\"sozai\":[0,0,0],\"special_feeling_num\":2"),
                 resourceCatalog(2, 2, 2, 2, 2));
         assertTrue(out, out.contains("插件MDB推导"));
     }
 
     @Test
-    public void derivedPoolRejectedOnWrongSource() {
+    public void derivedPoolRejectedOnWrongSource() throws Exception {
         String badSource = summary("\"sozai\":[99,99,99],\"special_feeling_num\":9")
                 .replace("mdb_pool_minus_all_selected_derivation", "unknown");
         String out = plan(badSource, resourceCatalog(1, 1, 1, 1, 1));
@@ -77,7 +79,7 @@ public class RamenRegionCombinationPlannerTest {
     }
 
     @Test
-    public void runtimePoolHasPriorityOverDerived() {
+    public void runtimePoolHasPriorityOverDerived() throws Exception {
         String runtimeFirst = summary("\"sozai\":[99,99,99],\"special_feeling_num\":9,"
                 + "\"selectable_region_ids\":[1,2,3]");
         String out = plan(runtimeFirst, resourceCatalog(1, 1, 1, 1, 1));
@@ -85,14 +87,14 @@ public class RamenRegionCombinationPlannerTest {
     }
 
     @Test
-    public void permutationSearchFindsBestOrder() {
+    public void permutationSearchFindsBestOrder() throws Exception {
         String out = plan(summary("\"sozai\":[5,0,0],\"special_feeling_num\":0"),
                 resourceCatalog(5, 0, 0, 0, 0));
         assertTrue(out, out.contains("连做3/3"));
     }
 
     @Test
-    public void duplicateIdsAreDedupedBeforeSizeCheck() {
+    public void duplicateIdsAreDedupedBeforeSizeCheck() throws Exception {
         // [1,1,2] dedupes to 2 ids -> must NOT be accepted; derived pool used.
         String dupRuntime = summary("\"sozai\":[99,99,99],\"special_feeling_num\":9,"
                 + "\"selectable_region_ids\":[1,1,2]");
@@ -106,7 +108,7 @@ public class RamenRegionCombinationPlannerTest {
     }
 
     @Test
-    public void deficitLabelStatesItsDefinition() {
+    public void deficitLabelStatesItsDefinition() throws Exception {
         String out = plan(summary("\"sozai\":[0,0,0],\"special_feeling_num\":2"),
                 resourceCatalog(2, 2, 2, 2, 2));
         assertTrue(out, out.contains("单做缺口合计"));

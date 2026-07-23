@@ -58,4 +58,8 @@ dependencies {
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
     testImplementation 'junit:junit:4.13.2'
+    // Real org.json for local unit tests: the mockable android.jar stub
+    // throws "not mocked" at runtime, and its JSONException is a checked
+    // exception (Maven org.json's is unchecked since 20231013).
+    testImplementation 'org.json:json:20240303'
 }
