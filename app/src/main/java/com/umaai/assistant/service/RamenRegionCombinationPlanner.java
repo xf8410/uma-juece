@@ -48,7 +48,7 @@ public final class RamenRegionCombinationPlanner {
                         .append(i + 1).append(".").append(c.names)
                         .append(" 连做").append(c.craftableCount).append("/3")
                         .append(" 单做").append(c.soloCraftableCount).append("/3")
-                        .append(" 缺口").append(c.totalDeficit);
+                        .append(" 单做缺口合计").append(c.totalDeficit);
                 if (c.specialNeeded > 0) out.append(" 万能").append(c.specialNeeded);
             }
             out.append("（仅资源排序；地区效果/训练价值未计分）");
@@ -61,17 +61,22 @@ public final class RamenRegionCombinationPlanner {
     private static CandidatePool candidatePool(JSONObject summary, JSONObject ramen,
                                                JSONObject catalog) {
         JSONArray runtime = ramen.optJSONArray("selectable_region_ids");
-        if (runtime != null && runtime.length() >= 3) {
-            return new CandidatePool(uniqueInts(runtime), "实时数据");
+        if (runtime != null) {
+            List<Integer> ids = uniqueInts(runtime);
+            if (ids.size() >= 3) {  // judge AFTER dedupe: [1,1,2] must fall through
+                return new CandidatePool(ids, "实时数据");
+            }
         }
         // Plugin-derived pool: emitted only on an actual selection turn
         // (hlpatch >= v3.24.32 guarantees exact-turn semantics), so it is
         // safe to consume as the current candidate pool.
         JSONArray derived = ramen.optJSONArray("selectable_region_ids_derived");
         String derivedSource = ramen.optString("selectable_region_ids_source", "");
-        if (derived != null && derived.length() >= 3
-                && "mdb_pool_minus_all_selected_derivation".equals(derivedSource)) {
-            return new CandidatePool(uniqueInts(derived), "插件MDB推导");
+        if (derived != null && "mdb_pool_minus_all_selected_derivation".equals(derivedSource)) {
+            List<Integer> ids = uniqueInts(derived);
+            if (ids.size() >= 3) {
+                return new CandidatePool(ids, "插件MDB推导");
+            }
         }
         int turn = summary.optInt("turn", -1);
         int selectType = -1;
