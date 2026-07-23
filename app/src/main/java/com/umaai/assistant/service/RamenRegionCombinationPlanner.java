@@ -46,7 +46,8 @@ public final class RamenRegionCombinationPlanner {
                 Combination c = combinations.get(i);
                 out.append(i == 0 ? " " : "；")
                         .append(i + 1).append(".").append(c.names)
-                        .append(" 可做").append(c.craftableCount).append("/3")
+                        .append(" 连做").append(c.craftableCount).append("/3")
+                        .append(" 单做").append(c.soloCraftableCount).append("/3")
                         .append(" 缺口").append(c.totalDeficit);
                 if (c.specialNeeded > 0) out.append(" 万能").append(c.specialNeeded);
             }
@@ -62,6 +63,15 @@ public final class RamenRegionCombinationPlanner {
         JSONArray runtime = ramen.optJSONArray("selectable_region_ids");
         if (runtime != null && runtime.length() >= 3) {
             return new CandidatePool(uniqueInts(runtime), "实时数据");
+        }
+        // Plugin-derived pool: emitted only on an actual selection turn
+        // (hlpatch >= v3.24.32 guarantees exact-turn semantics), so it is
+        // safe to consume as the current candidate pool.
+        JSONArray derived = ramen.optJSONArray("selectable_region_ids_derived");
+        String derivedSource = ramen.optString("selectable_region_ids_source", "");
+        if (derived != null && derived.length() >= 3
+                && "mdb_pool_minus_all_selected_derivation".equals(derivedSource)) {
+            return new CandidatePool(uniqueInts(derived), "插件MDB推导");
         }
         int turn = summary.optInt("turn", -1);
         int selectType = -1;
@@ -175,14 +185,18 @@ public final class RamenRegionCombinationPlanner {
     private static final class Combination {
         final String names;
         final String idKey;
+        /** Max bowls craftable in a row when inventory is actually consumed. */
         final int craftableCount;
+        /** Bowls craftable when each recipe is judged against full inventory alone. */
+        final int soloCraftableCount;
         final int totalDeficit;
         final int maxDeficit;
+        /** Universal (special) items consumed in the best crafting order. */
         final int specialNeeded;
         Combination(Region[] regions, int[] inventory, int special) {
             StringBuilder labels = new StringBuilder();
             StringBuilder ids = new StringBuilder();
-            int craftable = 0, deficitSum = 0, worst = 0, universal = 0;
+            int solo = 0, deficitSum = 0, worst = 0;
             for (Region region : regions) {
                 if (labels.length() > 0) { labels.append("+"); ids.append("-"); }
                 labels.append(region.name).append("#").append(region.id);
@@ -191,10 +205,42 @@ public final class RamenRegionCombinationPlanner {
                 for (int id = 1; id <= 3; id++) deficit += Math.max(0, region.cost[id] - inventory[id]);
                 deficitSum += deficit;
                 worst = Math.max(worst, deficit);
-                if (deficit <= Math.min(2, special)) { craftable++; universal += deficit; }
+                if (deficit <= Math.min(2, special)) solo++;
             }
-            names = labels.toString(); idKey = ids.toString(); craftableCount = craftable;
-            totalDeficit = deficitSum; maxDeficit = worst; specialNeeded = universal;
+            names = labels.toString(); idKey = ids.toString();
+            soloCraftableCount = solo;
+            totalDeficit = deficitSum; maxDeficit = worst;
+
+            // Simulate real consumption over all 3! = 6 crafting orders and
+            // keep the best: most bowls in a row, then fewest universal items.
+            int bestCraftable = 0, bestSpecial = Integer.MAX_VALUE;
+            int[][] orders = {{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}};
+            for (int[] order : orders) {
+                int[] remaining = inventory.clone();
+                int remainingSpecial = special;
+                int craftable = 0, specialUsed = 0;
+                for (int idx : order) {
+                    Region region = regions[idx];
+                    int deficit = 0;
+                    for (int id = 1; id <= 3; id++)
+                        deficit += Math.max(0, region.cost[id] - remaining[id]);
+                    // Per-bowl universal cap is 2; bowl fails if it exceeds
+                    // either the cap or the remaining universal stock.
+                    if (deficit > 2 || deficit > remainingSpecial) continue;
+                    for (int id = 1; id <= 3; id++)
+                        remaining[id] = Math.max(0, remaining[id] - region.cost[id]);
+                    remainingSpecial -= deficit;
+                    specialUsed += deficit;
+                    craftable++;
+                }
+                if (craftable > bestCraftable
+                        || (craftable == bestCraftable && specialUsed < bestSpecial)) {
+                    bestCraftable = craftable;
+                    bestSpecial = specialUsed;
+                }
+            }
+            craftableCount = bestCraftable;
+            specialNeeded = bestSpecial == Integer.MAX_VALUE ? 0 : bestSpecial;
         }
 
     }
