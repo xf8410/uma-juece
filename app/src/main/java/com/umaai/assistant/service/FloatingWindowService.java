@@ -926,6 +926,24 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             }
         }
 
+        // ★ v1.33.1: 候选地区池（插件 MDB 推导值，非运行时原生读数）。
+        // selectable_region_ids_source=unknown 时明确显示“尚待验证”，不猜。
+        JSONArray derivedIds = ramen.optJSONArray("selectable_region_ids_derived");
+        if (derivedIds != null && derivedIds.length() > 0) {
+            ensureRamenCatalogs();
+            if (buffInfo.length() > 0) buffInfo.append("\n");
+            buffInfo.append("候选地区(推导):");
+            for (int i = 0; i < derivedIds.length(); i++) {
+                if (i > 0) buffInfo.append("/");
+                int id = derivedIds.optInt(i, 0);
+                String name = ramenRegionNameCache.get(id);
+                buffInfo.append(name == null ? "编号" + id : name + "#" + id);
+            }
+        } else if ("unknown".equals(ramen.optString("selectable_region_ids_source", ""))) {
+            if (buffInfo.length() > 0) buffInfo.append("\n");
+            buffInfo.append("候选地区:尚待验证");
+        }
+
         if (tvBuffDetail != null && buffInfo.length() > 0) {
             tvBuffDetail.setText(buffInfo.toString().trim());
             tvBuffDetail.setVisibility(View.VISIBLE);
