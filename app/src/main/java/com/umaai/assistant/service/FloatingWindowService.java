@@ -842,41 +842,71 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
         StringBuilder info = new StringBuilder();
 
-        // ★ 试食会 热度等级 (moriagari_level)
-        // 0-5, 从 CheckpointPt 阈值计算: 50/120/210/330/480
+        // ★ 盛況度等级 (moriagari_level) — MDB check_point_pt_effect 真实11档
+        // 0-249=0, 250/500/1000/1500/2000/2500/3000/3500/4000/5000 → Lv1~10
+        final int[] MORIAGARI_TIERS = {250, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000};
         int moriagari = ramen.optInt("moriagari_level", -1);
         int cppt = ramen.optInt("checkpoint_pt", -1);
         if (moriagari >= 0 || cppt >= 0) {
-            if (moriagari < 0 && cppt >= 0) {
-                // 自行计算
-                if (cppt >= 480) moriagari = 5;
-                else if (cppt >= 330) moriagari = 4;
-                else if (cppt >= 210) moriagari = 3;
-                else if (cppt >= 120) moriagari = 2;
-                else if (cppt >= 50) moriagari = 1;
-                else moriagari = 0;
+            if (cppt >= 0) {
+                int lv = 0;
+                for (int t : MORIAGARI_TIERS) if (cppt >= t) lv++;
+                moriagari = lv;
+            } else if (moriagari > 10) {
+                moriagari = 10;
             }
-            // 进度条: Lv0~5, 每级用 □/■ 表示
+            // 进度条: Lv0~10
             StringBuilder bar = new StringBuilder();
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 10; i++) {
                 bar.append(i < moriagari ? "■" : "□");
             }
-            info.append("热").append(bar).append(" 等级").append(moriagari);
+            info.append("热").append(bar).append(" Lv").append(moriagari);
             if (cppt >= 0) {
-                info.append(" (").append(cppt);
-                // 下一级阈值
-                int nextThreshold = -1;
-                switch (moriagari) {
-                    case 0: nextThreshold = 50; break;
-                    case 1: nextThreshold = 120; break;
-                    case 2: nextThreshold = 210; break;
-                    case 3: nextThreshold = 330; break;
-                    case 4: nextThreshold = 480; break;
+                info.append(" ").append(cppt);
+                if (moriagari < 10) {
+                    info.append("/").append(MORIAGARI_TIERS[moriagari]);
                 }
-                if (nextThreshold > 0) {
-                    info.append("/").append(nextThreshold);
+                // RMJ目标: 第1/2/3年 1500/3000/3500(大成功5000)
+                int turn = json.optInt("turn", -1);
+                int year = turn < 0 ? -1 : (turn < 24 ? 1 : (turn < 48 ? 2 : 3));
+                if (year > 0) {
+                    int target = year == 1 ? 1500 : (year == 2 ? 3000 : 3500);
+                    info.append(cppt >= target ? " RMJ✓" : " RMJ差" + (target - cppt));
+                    // RMJ倒计时: turn 24/48/72行动结算后
+                    int rmjTurn = year == 1 ? 24 : (year == 2 ? 48 : 72);
+                    if (turn >= 0 && turn <= rmjTurn) {
+                        info.append(" 余").append(rmjTurn - turn).append("T");
+                    }
                 }
-                info.append(")");
+            }
+            info.append("\n");
+        }
+
+        // ★ 隠し味 + 素材槽 + 已选地区（MDB/截图确认字段）
+        int kakushimi = ramen.optInt("special_feeling_num", -1);
+        JSONArray sozai = ramen.optJSONArray("sozai");
+        JSONArray gauges = ramen.optJSONArray("acquisition_gauges");
+        if (kakushimi >= 0 || sozai != null) {
+            info.append("材");
+            if (sozai != null && sozai.length() >= 3) {
+                info.append(" 麺").append(sozai.optInt(0))
+                    .append(" 汤").append(sozai.optInt(1))
+                    .append(" 配").append(sozai.optInt(2));
+            }
+            if (gauges != null && gauges.length() >= 3) {
+                info.append(" (").append(gauges.optInt(0))
+                    .append("/").append(gauges.optInt(1))
+                    .append("/").append(gauges.optInt(2)).append(")");
+            }
+            if (kakushimi >= 0) {
+                info.append(" 秘").append(kakushimi).append("/4");
+            }
+            JSONArray regions = ramen.optJSONArray("selected_region_ids");
+            if (regions != null && regions.length() > 0) {
+                info.append(" 区");
+                for (int i = 0; i < regions.length(); i++) {
+                    info.append(i == 0 ? "" : "+").append(regions.optInt(i));
+                }
             }
             info.append("\n");
         }
