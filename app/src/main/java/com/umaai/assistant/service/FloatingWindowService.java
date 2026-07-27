@@ -728,7 +728,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         // condition_type=3 → 粉丝数条件, condition_value_1=需要的粉丝数
         // turn=检查回合(从游戏开始算), target_type=1=生涯目标
         if (fan >= 0 && month > 0) {
-            int currentTurn = (month - 1) * 2 + half;
+            // ★ v1.25: 用插件权威回合数（_totalTurnNum），旧 (month-1)*2+half 在
+            // 拉面杯第一年特殊日历（4/5/6月双份）和第2/3年会错位 → 识别不到目标比赛
+            int jsonTurn = json.optInt("turn", -1);
+            int currentTurn = jsonTurn > 0 ? jsonTurn : (month - 1) * 2 + half;
             JSONArray routeRaces = getRouteRaceTargets();
             if (routeRaces != null) {
                 int nearestFanTarget = 0;
