@@ -938,6 +938,12 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         } else if (tvRamenGauge != null) {
             tvRamenGauge.setVisibility(View.GONE);
         }
+        // ★ v1.26: 吃面时机建议 + 地区选择推荐（用户反馈：只告诉能不能吃，不告诉什么时候吃；选地区不推荐）
+        String tastingAdvice = buildTastingAdvice(json, ramen);
+        if (!tastingAdvice.isEmpty()) planInfo.insert(0, tastingAdvice + "\n");
+        String regionAdvice = buildRegionAdvice(json, ramen);
+        if (!regionAdvice.isEmpty()) planInfo.insert(0, regionAdvice + "\n");
+
         if (tvRamenPlan != null && planInfo.length() > 0) {
             tvRamenPlan.setText(planInfo.toString().trim());
             tvRamenPlan.setVisibility(View.VISIBLE);
@@ -1277,6 +1283,10 @@ public class FloatingWindowService extends Service implements HttpDataService.On
 
     private String resolveRamenEffect(JSONObject effect) {
         String rawName = effect.optString("name", "");
+        // ★ v1.26: 过滤空效果槽（类别-1/编号0/值0占位条目，用户反馈"未解析效果"噪音）
+        if (rawName.isEmpty() && effect.optInt("EffectId", 0) == 0 && effect.optInt("EffectValue", 0) == 0) {
+            return "";
+        }
         int effectId = effect.optInt("EffectId", 0);
         int value = effect.optInt("EffectValue", 0);
         int category = ramenCategory(effect, rawName);
@@ -1284,6 +1294,109 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (category == 2) return resolveRamenActionEffect(effectId, value);
         if (category == 4) return "特殊效果(编号" + effectId + ",值" + value + ")";
         return "未解析效果(类别" + category + ",编号" + effectId + ",值" + value + ")";
+    }
+
+    // [MDB region_feeling] 地区配方 麺/汤/配（id 1-10，11-20同1-10）
+    private static final int[][] RAMEN_RECIPES = {
+        null,
+        {2,2,1},{1,2,2},{3,1,1},{2,3,0},{1,1,3},   // 1-5 札幌/函館/新潟/福島/東京
+        {2,0,3},{3,2,0},{0,3,2},{2,1,2},{1,3,1}     // 6-10 中山/中京/京都/阪神/小倉
+    };
+    // [MDB region_effect] 地区对应训练类型（0速1耐2力3根4智）
+    private static final int[][] RAMEN_REGION_ATTRS = {
+        null,
+        {0},{1},{2},{3},{4},
+        {0,2,4},{2,3},{1,3},{1,2},{4}
+    };
+
+    /** 能否吃面：已选地区配方 vs 素材+隠し味(≤2) [MDB+截图] */
+    private boolean canEatRamen(JSONObject ramen) {
+        JSONArray selected = ramen.optJSONArray("selected_region_ids");
+        JSONArray sozai = ramen.optJSONArray("sozai");
+        if (selected == null || selected.length() == 0 || sozai == null || sozai.length() < 3) return false;
+        int kakushimi = ramen.optInt("special_feeling_num", 0);
+        for (int r = 0; r < selected.length(); r++) {
+            int rid = selected.optInt(r);
+            int base = rid > 10 ? rid - 10 : rid;
+            if (base < 1 || base > 10) continue;
+            int[] recipe = RAMEN_RECIPES[base];
+            int shortage = 0;
+            for (int i = 0; i < 3; i++) shortage += Math.max(0, recipe[i] - sozai.optInt(i));
+            if (shortage <= Math.min(2, kakushimi)) return true;
+        }
+        return false;
+    }
+
+    /** ★ v1.26 吃面时机建议（机制: 当回合buff[截图]/槽满FIFO溢出[MDB]/RMJ指标[MDB]） */
+    private String buildTastingAdvice(JSONObject json, JSONObject ramen) {
+        int turn = json.optInt("turn", -1);
+        if (turn <= 0 || !canEatRamen(ramen)) return "";
+        int year = turn <= 24 ? 1 : (turn <= 48 ? 2 : 3);
+        int target = year == 1 ? 1500 : (year == 2 ? 3000 : 3500);
+        int rmjTurn = year == 1 ? 24 : (year == 2 ? 48 : 72);
+        int cppt = ramen.optInt("checkpoint_pt", -1);
+        JSONArray sozai = ramen.optJSONArray("sozai");
+        int sozaiTotal = 0;
+        if (sozai != null) for (int i = 0; i < sozai.length(); i++) sozaiTotal += sozai.optInt(i);
+        if (sozaiTotal >= 10) return "🍜建议吃：槽满10，不吃会FIFO溢出";
+        if (cppt >= 0 && rmjTurn - turn <= 3 && cppt < target)
+            return "🍜紧急：RMJ剩" + (rmjTurn - turn) + "回合，pt差" + (target - cppt) + "，能吃就吃";
+        JSONArray trainings = json.optJSONArray("trainings");
+        if (trainings != null) {
+            for (int i = 0; i < trainings.length(); i++) {
+                JSONObject tr = trainings.optJSONObject(i);
+                if (tr == null) continue;
+                if (tr.optInt("shining", 0) == 1 && tr.optInt("heads", 0) >= 2)
+                    return "🍜好时机：彩圈多人头，当回合buff收益最大";
+                if (tr.optInt("failure_rate", 0) >= 15 && tr.optInt("heads", 0) >= 2)
+                    return "🍜好时机：高失败率训练，吃面降失败率";
+            }
+        }
+        if (cppt >= target) return "🍜可留：pt已达标" + target + "，材料留给彩圈大回合";
+        return "🍜可吃可留：等彩圈/多人头回合吃更值";
+    }
+
+    /** ★ v1.26 地区选择推荐：按卡组类型计数选匹配地区（选择回合 turn 3/25/49） */
+    private String buildRegionAdvice(JSONObject json, JSONObject ramen) {
+        int turn = json.optInt("turn", -1);
+        if (turn != 3 && turn != 25 && turn != 49) return "";
+        JSONArray selected = ramen.optJSONArray("selected_region_ids");
+        if (selected != null && selected.length() > 0) return "";
+        ensureNameCaches();
+        int[] typeCount = new int[5];
+        JSONArray sc = json.optJSONArray("support_cards");
+        if (sc != null) {
+            for (int i = 0; i < sc.length(); i++) {
+                JSONObject c = sc.optJSONObject(i);
+                if (c == null) continue;
+                int cardId = c.optInt("support_card_id", 0);
+                String tp = supportCardTypeCache != null ? supportCardTypeCache.get(cardId) : null;
+                String lb = tp != null ? supportCardDataTypeLabel(tp) : "";
+                int idx = "速耐力根智".indexOf(lb.isEmpty() ? ' ' : lb.charAt(0));
+                if (idx >= 0) typeCount[idx]++;
+            }
+        }
+        // 地区打分：匹配类型卡数求和（无卡组数据时退化为人气推荐）
+        String[] names = {"","札幌","函館","新潟","福島","東京","中山","中京","京都","阪神","小倉"};
+        int year = turn <= 24 ? 1 : (turn <= 48 ? 2 : 3);
+        int[][] pool = year == 1 ? new int[][]{{1},{2},{3},{4},{5}}
+                : year == 2 ? new int[][]{{6},{7},{8},{9},{10}}
+                : new int[][]{{1},{2},{3},{4},{5},{6},{7},{8},{9},{10}};
+        java.util.List<int[]> scored = new java.util.ArrayList<>();
+        for (int[] p : pool) {
+            int rid = p[0];
+            int score = 0;
+            for (int a : RAMEN_REGION_ATTRS[rid]) score += typeCount[a] * 10;
+            scored.add(new int[]{rid, score});
+        }
+        scored.sort((a, b) -> b[1] - a[1]);
+        StringBuilder sb = new StringBuilder("🗺地区推荐：");
+        for (int i = 0; i < Math.min(3, scored.size()); i++) {
+            if (i > 0) sb.append("+");
+            sb.append(names[scored.get(i)[0]]);
+        }
+        sb.append("（按卡组类型）");
+        return sb.toString();
     }
 
     /**
@@ -1448,8 +1561,11 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                     urafType = name;
                     urafState = b.optString("state", "");
                 } else {
-                    if (effectStr.length() > 0) effectStr.append(" ");
-                    effectStr.append(resolveRamenEffect(b));
+                    String resolved = resolveRamenEffect(b);
+                    if (!resolved.isEmpty()) {
+                        if (effectStr.length() > 0) effectStr.append(" ");
+                        effectStr.append(resolved);
+                    }
                 }
             }
         }
@@ -2464,6 +2580,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             windowManager.addView(floatingView, params);
             isViewAdded = true;
             Log.d(TAG, "Floating view added");
+
+            // ★ v1.26: 折叠/展开面板（用户反馈占地方）
+            final View contentContainer = floatingView.findViewById(R.id.content_container);
+            final TextView btnCollapse = floatingView.findViewById(R.id.btn_collapse);
+            if (btnCollapse != null && contentContainer != null) {
+                btnCollapse.setOnClickListener(v -> {
+                    boolean show = contentContainer.getVisibility() != View.VISIBLE;
+                    contentContainer.setVisibility(show ? View.VISIBLE : View.GONE);
+                    btnCollapse.setText(show ? "▼" : "▶");
+                });
+            }
 
             View btnClose = floatingView.findViewById(R.id.btn_close);
             // 拉面按钮：合并三个端点后只产生一次GitHub提交。

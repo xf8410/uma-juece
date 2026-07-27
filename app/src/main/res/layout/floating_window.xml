@@ -36,6 +36,18 @@
             android:visibility="gone" />
 
         <TextView
+            android:id="@+id/btn_collapse"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:text="▼"
+            android:textColor="#AAAAAA"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:layout_marginEnd="4dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
             android:id="@+id/btn_close"
             android:layout_width="20dp"
             android:layout_height="20dp"
@@ -83,6 +95,12 @@
             android:text=""
             android:visibility="gone" />
     </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/content_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
 
     <!-- 推荐 -->
     <TextView
@@ -510,6 +528,8 @@
             android:textSize="10sp"
             android:textStyle="bold"
             android:text="监控中..." />
+    </LinearLayout>
+
     </LinearLayout>
 
 </LinearLayout>
