@@ -88,6 +88,9 @@ public class DataCollector {
     private String sessionId;
     private String scenario;
     private List<TurnSnapshot> turns = new ArrayList<>();
+    private final List<String> eventObservations = new ArrayList<>();
+    private static final int MAX_EVENT_OBSERVATIONS = 64;
+    private long lastEventObservationId = 0;
     private TurnSnapshot prevSnapshot = null;
 
     // ★ v2.4: 持久化上传队列 — 待上传文件先落盘，单 worker 线程消费，
@@ -490,6 +493,18 @@ public class DataCollector {
     /**
      * ★ v1.24: 处理插件推送的事件选择数据
      */
+    public synchronized void onEventObservation(JSONObject observation) {
+        if (observation == null) return;
+        long id = observation.optLong("observation_id", 0);
+        if (id <= 0 || id <= lastEventObservationId) return;
+        // Keep runtime labels separate: result_label remains unknown without direct UI evidence.
+        if (eventObservations.size() >= MAX_EVENT_OBSERVATIONS) eventObservations.remove(0);
+        eventObservations.add(observation.toString());
+        lastEventObservationId = id;
+        persistState();
+        checkpointUploadLocked();
+    }
+
     public void onEventData(JSONObject json) {
         try {
             int storyId = json.optInt("story_id", 0);
@@ -1150,6 +1165,12 @@ public class DataCollector {
             session.put("is_final", isFinal);
             session.put("valid", true);
             session.put("mapping_version", "v2.4_102power_105stamina");
+
+            JSONArray eventObsArr = new JSONArray();
+            for (String raw : eventObservations) {
+                try { eventObsArr.put(new JSONObject(raw)); } catch (JSONException ignored) {}
+            }
+            session.put("event_observations", eventObsArr);
 
             // 回合数据
             JSONArray turnsArr = new JSONArray();

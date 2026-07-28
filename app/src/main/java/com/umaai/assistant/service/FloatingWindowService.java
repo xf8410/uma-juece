@@ -142,6 +142,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private Thread evtThread;
     private volatile boolean evtRunning = false;
     private int lastEvtChoiceCount = 0;
+    private long lastEvtObservationId = 0;
     private int lastEvtStoryId = 0;
     // 支援卡ID→名称缓存
     private java.util.Map<Integer, String> supportCardNameCache = null;
@@ -1918,9 +1919,18 @@ public class FloatingWindowService extends Service implements HttpDataService.On
             if (code == 200) {
                 BufferedReader reader = new BufferedReader(
                         new InputStreamReader(conn.getInputStream(), "UTF-8"));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
+                final int maxChars = urlStr.contains("/summary") ? 131072 : 32768;
+                StringBuilder sb = new StringBuilder(Math.min(maxChars, 8192));
+                char[] chunk = new char[2048];
+                int n;
+                while ((n = reader.read(chunk)) >= 0) {
+                    if (sb.length() + n > maxChars) {
+                        Log.w(TAG, "HTTP response exceeds safe limit: " + urlStr);
+                        reader.close();
+                        return null;
+                    }
+                    sb.append(chunk, 0, n);
+                }
                 reader.close();
                 return sb.toString();
             }
@@ -2267,17 +2277,17 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private void startEvtPolling() {
         evtRunning = true;
         evtThread = new Thread(() -> {
-            // 先清一下旧数据
-            httpGet("http://127.0.0.1:18765/api/event/clear");
+            // Do not clear SO state here: completed observations must survive UI reopen.
             lastEvtChoiceCount = 0;
             lastEvtStoryId = 0;
 
             while (evtRunning && evtPanelVisible) {
                 try {
                     String data = httpGet("http://127.0.0.1:18765/api/event/choices");
-                    if (data != null && !data.isEmpty()) {
-                        processEvtData(data);
-                    }
+                    if (data != null && !data.isEmpty()) processEvtData(data);
+                    String obs = httpGet("http://127.0.0.1:18765/api/event/observations?after_id="
+                            + lastEvtObservationId);
+                    if (obs != null && !obs.isEmpty()) processEvtObservations(obs);
                 } catch (Exception e) {
                     Log.e(TAG, "evt poll error: " + e.getMessage());
                 }
@@ -2292,6 +2302,33 @@ public class FloatingWindowService extends Service implements HttpDataService.On
     private void stopEvtPolling() {
         evtRunning = false;
         if (evtThread != null) evtThread.interrupt();
+    }
+
+    private void processEvtObservations(String jsonStr) {
+        try {
+            JSONObject root = new JSONObject(jsonStr);
+            JSONArray observations = root.optJSONArray("observations");
+            if (observations == null) return;
+            for (int i = 0; i < observations.length(); i++) {
+                JSONObject observation = observations.optJSONObject(i);
+                if (observation == null) continue;
+                long id = observation.optLong("observation_id", 0);
+                if (id <= lastEvtObservationId) continue;
+                dataCollector.onEventObservation(observation);
+                lastEvtObservationId = id;
+            }
+            if (lastEvtObservationId > 0) {
+                final long shownId = lastEvtObservationId;
+                handler.post(() -> {
+                    if (tvEvtContent != null && evtPanelVisible) {
+                        tvEvtContent.setText("事件结果已安全记录 #" + shownId + "（结果标签待确认）");
+                        tvEvtContent.setTextColor(0xFF00FFAA);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "event observation parse error: " + e.getMessage());
+        }
     }
 
     private void processEvtData(String jsonStr) {
@@ -2328,17 +2365,8 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         tvEvtContent.setTextColor(0xFF888888);
                     }
                 });
-                // 3秒后自动清空
-                try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
-                httpGet("http://127.0.0.1:18765/api/event/clear");
-                lastEvtChoiceCount = 0;
-                lastEvtStoryId = 0;
-                handler.post(() -> {
-                    if (tvEvtContent != null) {
-                        tvEvtContent.setText("监控中...");
-                        tvEvtContent.setTextColor(0xFF00FFAA);
-                    }
-                });
+                // SO v3.24.74 keeps completed observations independently.
+                // Never clear them automatically; consume by observation_id instead.
                 return;
             }
 
