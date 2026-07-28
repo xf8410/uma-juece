@@ -23,14 +23,15 @@ android {
         applicationId "com.umaai.assistant"
         minSdk 26
         targetSdk 34
-        versionCode 13304
-        versionName "1.33.4"
+        versionCode 13305
+        versionName "1.33.5"
 
         // Inject GitHub token at build time — not in source code
         // ★ 安全警告: Token 编译进 APK 可被反编译提取
         // 长期方案: 改用后端代理上传，不在 APK 中存储可写 Token
         // 短期缓解: 使用 fine-grained token, 只允许 uma-data, 最小权限, 短有效期
-        buildConfigField "String", "GITHUB_TOKEN", "\"${secretsProps.getProperty('GITHUB_TOKEN', '')}\""
+        def dataUploadToken = System.getenv("DATA_UPLOAD_TOKEN") ?: secretsProps.getProperty('GITHUB_TOKEN', '')
+        buildConfigField "String", "GITHUB_TOKEN", "\"${dataUploadToken}\""
     }
 
     signingConfigs {

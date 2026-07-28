@@ -46,6 +46,14 @@ jobs:
           echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
           echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
 
+      - name: Require data-upload credential
+        env:
+          DATA_UPLOAD_TOKEN: ${{ secrets.DATA_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DATA_UPLOAD_TOKEN"
+          echo "DATA_UPLOAD_TOKEN=$DATA_UPLOAD_TOKEN" >> "$GITHUB_ENV"
+
       - name: Test and build signed release
         uses: gradle/actions/setup-gradle@v4
         with:
