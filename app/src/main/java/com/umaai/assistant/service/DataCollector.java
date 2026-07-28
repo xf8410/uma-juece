@@ -232,6 +232,8 @@ public class DataCollector {
             writeFile(tmp, st.toString());
             if (!tmp.renameTo(getStateFile())) {
                 Log.w(TAG, "persistState rename failed");
+            } else {
+                LocalBackupManager.backupCurrentAsync(context, getStateFile());
             }
         } catch (Exception e) {
             Log.e(TAG, "Persist state failed: " + e.getMessage());
@@ -278,9 +280,22 @@ public class DataCollector {
         }
     }
 
-    /** 获取当前session的回合数 */
-    public int getTurnCount() {
-        return turns.size();
+    /** 获取当前 session 已记录的不同回合数（同回合可有多个 observation）。 */
+    public synchronized int getTurnCount() {
+        int count = 0;
+        int last = Integer.MIN_VALUE;
+        for (TurnSnapshot t : turns) {
+            if (t.turn != last) {
+                count++;
+                last = t.turn;
+            }
+        }
+        if (prevSnapshot != null && prevSnapshot.turn != last) count++;
+        return count;
+    }
+
+    public synchronized int getObservationCount() {
+        return turns.size() + (prevSnapshot != null && !turns.contains(prevSnapshot) ? 1 : 0);
     }
 
     public String getSessionId() {
@@ -324,10 +339,8 @@ public class DataCollector {
             TurnSnapshot snapshot = parseSnapshot(json);
             if (snapshot == null) return ACTION_ERROR;
 
-            // ★ v2.3: 去重 — 同一 turn 的相同快照不重复处理（push+poll 可能同时到达）
-            String snapHash = snapshot.speed + "," + snapshot.stamina + ","
-                + snapshot.power + "," + snapshot.guts + "," + snapshot.wisdom
-                + "," + snapshot.vital + "," + snapshot.turn;
+            // 同回合也可能发生吃面、RMJ Pt、素材、效果或训练人头变化。
+            String snapHash = buildSnapshotHash(snapshot);
             if (snapshot.turn == lastProcessedTurn && snapHash.equals(lastSnapshotHash)) {
                 Log.d(TAG, "Duplicate summary for turn " + snapshot.turn + ", skipping");
                 return ACTION_UNKNOWN;
@@ -440,8 +453,18 @@ public class DataCollector {
                 // ★ v2.4: checkpoint 入持久化上传队列（先落盘再排队，崩溃不丢）
                 checkpointUploadLocked();
             } else if (snapshot.turn == prevSnapshot.turn) {
-                // 同回合内的数据更新
+                // 同回合实质变化也要留档，例如吃面前后 RMJ/素材/效果/人头变化。
                 snapshot.actionTaken = prevSnapshot.actionTaken;
+                snapshot.actionSource = prevSnapshot.actionSource;
+                snapshot.actionConfidence = prevSnapshot.actionConfidence;
+                snapshot.sameTurnTransitionRaw = buildSameTurnTransition(prevSnapshot, snapshot);
+                prevSnapshot.observationKind = "same_turn_before_change";
+                turns.add(prevSnapshot);
+                prevSnapshot = snapshot;
+                if (snapshot.scenario != null && !snapshot.scenario.isEmpty()) scenario = snapshot.scenario;
+                persistState();
+                checkpointUploadLocked();
+                return detectedAction;
             } else {
                 // ★ v2.4: 回合回退（SO读取抖动等）— 不记录、不伪造，显式告警并更新基准
                 Log.w(TAG, "Turn regression: " + prevSnapshot.turn + " → " + snapshot.turn
@@ -564,6 +587,10 @@ public class DataCollector {
                     }
 
                     opt.failureRate = tr.optInt("failure_rate", 0);
+                    JSONArray partnerIds = tr.optJSONArray("partner_ids");
+                    if (partnerIds != null) opt.partnerIdsRaw = partnerIds.toString();
+                    JSONArray partners = tr.optJSONArray("partners");
+                    if (partners != null) opt.partnersRaw = partners.toString();
                     // ★ v2.0: 统一 shining/heads 的 -1/null/0 → 0
                     // ★ v2.3: shining/heads — 保留 -1（未知），不洗成 0
                     int sh = tr.optInt("shining", -1);
@@ -642,6 +669,81 @@ public class DataCollector {
             Log.e(TAG, "parseSnapshot error: " + e.getMessage());
             return null;
         }
+    }
+
+    private String buildSnapshotHash(TurnSnapshot s) {
+        StringBuilder b = new StringBuilder();
+        b.append(s.turn).append('|').append(s.speed).append('|').append(s.stamina)
+            .append('|').append(s.power).append('|').append(s.guts).append('|')
+            .append(s.wisdom).append('|').append(s.skillPt).append('|').append(s.vital)
+            .append('|').append(s.maxVital).append('|').append(s.motivation)
+            .append('|').append(s.ramenRaw == null ? "" : s.ramenRaw)
+            .append('|').append(s.buffsRaw == null ? "" : s.buffsRaw);
+        if (s.trainings != null) for (TrainingOption t : s.trainings) {
+            b.append('|').append(t.commandId).append(':').append(t.isEnabled)
+                .append(':').append(t.gainSpeed).append(':').append(t.gainStamina)
+                .append(':').append(t.gainPower).append(':').append(t.gainGuts)
+                .append(':').append(t.gainWisdom).append(':').append(t.gainSkillPt)
+                .append(':').append(t.vitalCost).append(':').append(t.failureRate)
+                .append(':').append(t.shining).append(':').append(t.heads)
+                .append(':').append(t.partnerIdsRaw == null ? "" : t.partnerIdsRaw)
+                .append(':').append(t.partnersRaw == null ? "" : t.partnersRaw);
+        }
+        return Integer.toHexString(b.toString().hashCode());
+    }
+
+    /** 仅记录直接观察到的前后值；不把相关变化命名为吃面因果。 */
+    private String buildSameTurnTransition(TurnSnapshot before, TurnSnapshot after) {
+        try {
+            JSONObject event = new JSONObject();
+            event.put("type", "observed_same_turn_change");
+            event.put("turn", after.turn);
+            event.put("captured_at", after.capturedAt);
+            if (before.ramenRaw != null && after.ramenRaw != null) {
+                JSONObject rb = new JSONObject(before.ramenRaw), ra = new JSONObject(after.ramenRaw);
+                JSONObject ramen = new JSONObject();
+                String[] keys = {"checkpoint_pt", "moriagari_level", "special_feeling_num",
+                    "recommend_type", "sozai", "selected_region_ids", "active_effects", "feeling_info"};
+                for (String key : keys) copyObservedChange(ramen, key, rb, ra);
+                if (ramen.length() > 0) event.put("ramen", ramen);
+            }
+            JSONArray hb = trainingCounts(before), ha = trainingCounts(after);
+            if (!hb.toString().equals(ha.toString())) {
+                JSONObject tr = new JSONObject(); tr.put("before", hb); tr.put("after", ha);
+                event.put("training_counts", tr);
+            }
+            return event.length() > 3 ? event.toString() : null;
+        } catch (Exception e) {
+            Log.w(TAG, "Build same-turn transition failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void copyObservedChange(JSONObject out, String key, JSONObject before,
+            JSONObject after) throws JSONException {
+        Object b = before.opt(key), a = after.opt(key);
+        String bs = b == null ? "null" : b.toString(), as = a == null ? "null" : a.toString();
+        if (!bs.equals(as)) {
+            JSONObject change = new JSONObject();
+            change.put("before", b == null ? JSONObject.NULL : b);
+            change.put("after", a == null ? JSONObject.NULL : a);
+            if (b instanceof Number && a instanceof Number)
+                change.put("delta", ((Number) a).longValue() - ((Number) b).longValue());
+            out.put(key, change);
+        }
+    }
+
+    private JSONArray trainingCounts(TurnSnapshot s) throws JSONException {
+        JSONArray arr = new JSONArray();
+        if (s.trainings != null) for (TrainingOption t : s.trainings) {
+            JSONObject o = new JSONObject();
+            o.put("command_id", t.commandId); o.put("name", t.name);
+            o.put("heads", t.heads); o.put("shining", t.shining);
+            if (t.partnerIdsRaw != null) o.put("partner_ids", new JSONArray(t.partnerIdsRaw));
+            if (t.partnersRaw != null) o.put("partners", new JSONArray(t.partnersRaw));
+            arr.put(o);
+        }
+        return arr;
     }
 
     // ========================================================================
@@ -913,6 +1015,7 @@ public class DataCollector {
                 Log.e(TAG, "enqueueUpload rename failed: " + sessId);
                 return;
             }
+            LocalBackupManager.backupSessionAsync(context, sessId, dst);
         } catch (Exception e) {
             Log.e(TAG, "enqueueUpload write failed: " + sessId + " — " + e.getMessage());
             return;
@@ -1035,7 +1138,7 @@ public class DataCollector {
         try {
             JSONObject session = new JSONObject();
             session.put("session_id", sessId);
-            session.put("schema_version", 3);
+            session.put("schema_version", 4);
             session.put("rng_observation_valid", false);
             session.put("rng_invalid_reason", "offset_0x198_is_ObscuredInt_not_u32x4");
             session.put("app_version", "v2.4");
@@ -1064,6 +1167,18 @@ public class DataCollector {
                 }
             }
             session.put("turns", turnsArr);
+            int distinctTurnCount = 0;
+            int lastTurnNumber = Integer.MIN_VALUE;
+            for (int i = 0; i < turnsArr.length(); i++) {
+                int turnNumber = turnsArr.getJSONObject(i).optInt("turn", 0);
+                if (turnNumber != lastTurnNumber) {
+                    distinctTurnCount++;
+                    lastTurnNumber = turnNumber;
+                }
+            }
+            session.put("turn_count", distinctTurnCount);
+            session.put("observation_count", turnsArr.length());
+            session.put("record_kind", "observations_with_same_turn_changes");
 
             // 最终属性
             TurnSnapshot last = prevSnap;
@@ -1109,14 +1224,15 @@ public class DataCollector {
             int totalTurns = turns.size();
             for (int i = 0; i < turns.size(); i++) {
                 TurnSnapshot t = turns.get(i);
-                if (t.turn <= prevTurn) {
-                    errors.put("Turn not monotonic at index " + i + ": " + t.turn + " <= " + prevTurn);
+                // schema v4 允许同一回合保存多个客观 observation；只禁止回退。
+                if (t.turn < prevTurn) {
+                    errors.put("Turn regressed at index " + i + ": " + t.turn + " < " + prevTurn);
                     valid = false;
                 }
                 if (t.turn > prevTurn + 1 && prevTurn > 0) {
                     gapCount++;
                 }
-                prevTurn = t.turn;
+                if (t.turn > prevTurn) prevTurn = t.turn;
                 if ("Unknown".equals(t.actionTaken)) unknownActionCount++;
                 if (t.trainings != null) {
                     boolean allZero = true;
@@ -1155,6 +1271,16 @@ public class DataCollector {
             v.put("errors", errors);
             v.put("warnings", warnings);
             v.put("gap_count", gapCount);
+            v.put("observation_count", totalTurns);
+            int distinctTurns = 0;
+            int lastDistinctTurn = Integer.MIN_VALUE;
+            for (TurnSnapshot t : turns) {
+                if (t.turn != lastDistinctTurn) {
+                    distinctTurns++;
+                    lastDistinctTurn = t.turn;
+                }
+            }
+            v.put("distinct_turn_count", distinctTurns);
             v.put("unknown_action_ratio", totalTurns > 0 ? (double) unknownActionCount / totalTurns : 0.0);
             v.put("zero_gain_ratio", totalTurns > 0 ? (double) zeroGainCount / totalTurns : 0.0);
         } catch (JSONException e) {
@@ -1300,6 +1426,8 @@ public class DataCollector {
         String supportCardsRaw;
         String skillsRaw;
         String ramenRaw;
+        String sameTurnTransitionRaw;
+        String observationKind = "turn_snapshot";
         TrainingOption[] trainings;
         String aiBest;
         int aiScore;
@@ -1361,6 +1489,10 @@ public class DataCollector {
                     tr.put("failure_rate", opt.failureRate);
                     tr.put("shining", opt.shining);
                     tr.put("heads", opt.heads);
+                    if (opt.partnerIdsRaw != null)
+                        tr.put("partner_ids", new JSONArray(opt.partnerIdsRaw));
+                    if (opt.partnersRaw != null)
+                        tr.put("partners", new JSONArray(opt.partnersRaw));
                     trArr.put(tr);
                 }
                 o.put("trainings", trArr);
@@ -1368,6 +1500,10 @@ public class DataCollector {
 
             if (charaId > 0) o.put("chara_id", charaId);
             if (storyId > 0) o.put("story_id", storyId);
+
+            o.put("observation_kind", observationKind);
+            if (sameTurnTransitionRaw != null && !sameTurnTransitionRaw.isEmpty())
+                o.put("observed_transition", new JSONObject(sameTurnTransitionRaw));
 
             // ★ v2.3: 动作来源元数据
             o.put("action_taken", actionTaken);
@@ -1423,6 +1559,9 @@ public class DataCollector {
             s.scenario = o.optString("scenario", "");
             s.charaId = o.optInt("chara_id", 0);
             s.storyId = o.optInt("story_id", 0);
+            s.observationKind = o.optString("observation_kind", "turn_snapshot");
+            JSONObject observedTransition = o.optJSONObject("observed_transition");
+            if (observedTransition != null) s.sameTurnTransitionRaw = observedTransition.toString();
             s.actionTaken = o.optString("action_taken", "Unknown");
 
             JSONObject stats = o.optJSONObject("stats");
@@ -1481,6 +1620,10 @@ public class DataCollector {
                     opt.failureRate = tr.optInt("failure_rate", 0);
                     opt.shining = tr.optInt("shining", -1);
                     opt.heads = tr.optInt("heads", -1);
+                    JSONArray partnerIds = tr.optJSONArray("partner_ids");
+                    if (partnerIds != null) opt.partnerIdsRaw = partnerIds.toString();
+                    JSONArray partners = tr.optJSONArray("partners");
+                    if (partners != null) opt.partnersRaw = partners.toString();
                     s.trainings[i] = opt;
                 }
             }
@@ -1527,5 +1670,7 @@ public class DataCollector {
         int failureRate;
         int shining;
         int heads;
+        String partnerIdsRaw;
+        String partnersRaw;
     }
 }

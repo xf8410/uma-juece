@@ -95,25 +95,60 @@
             android:layout_weight="1"
             android:textColor="#88CC88"
             android:textSize="12sp"
-            android:text="自动采集：待机中" />
+            android:text="本局状态：请查看悬浮窗" />
 
         <Button
             android:id="@+id/btn_upload_data"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="上传本局记录"
+            android:text="封存并上传本局"
             android:textSize="11sp"
             android:padding="4dp" />
 
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/local_backup_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/data_collection_row"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btn_choose_backup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="选择本地目录"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btn_backup_now"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="立即备份"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tv_backup_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/local_backup_row"
+        android:gravity="center"
+        android:text="本地备份：未选择目录"
+        android:textColor="#88CC88"
+        android:textSize="11sp" />
+
     <TextView
         android:id="@+id/tv_status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/btn_stop_float"
+        android:layout_below="@+id/tv_backup_status"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="12dp"
         android:textColor="#888888"
         android:textSize="14sp"
         android:text="本地通信：未启动" />

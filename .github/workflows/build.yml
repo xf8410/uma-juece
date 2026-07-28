@@ -1,4 +1,4 @@
-name: Build APK
+name: Build fixed-signature APK
 
 on:
   push:
@@ -26,54 +26,62 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build with Gradle
-        uses: gradle/gradle-build-action@v2
+      # Fail closed: never publish another APK signed by a runner-generated debug key.
+      - name: Restore permanent signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_STORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/uma-juece-release.jks"
+          test -s "$RUNNER_TEMP/uma-juece-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/uma-juece-release.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_STORE_PASSWORD=$ANDROID_STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Test and build signed release
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.6'
-          arguments: testDebugUnitTest assembleDebug
+      - run: gradle testDebugUnitTest assembleRelease
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
+      - name: Verify APK signature and print certificate SHA-256
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/release -name '*.apk' -type f | head -1)
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --verbose --print-certs "$APK" | tee signature-report.txt
+          grep -q 'Verified using v2 scheme.*true' signature-report.txt
 
-      - name: Get version
+      - name: Get version and rename APK
         id: version
         run: |
           VERSION=$(grep -oP 'versionName "\K[^"]+' app/build.gradle)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/release/*.apk "uma-juece_v${VERSION}.apk"
 
-      - name: Check if tag exists
-        id: check_tag
-        run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uma-juece-signed-${{ steps.version.outputs.version }}
+          path: |
+            uma-juece_v${{ steps.version.outputs.version }}.apk
+            signature-report.txt
 
-      - name: Rename APK
-        run: |
-          cp app/build/outputs/apk/debug/*.apk uma-juece_v${{ steps.version.outputs.version }}.apk
-
-      - name: Create Release
-        if: steps.check_tag.outputs.exists != 'true'
-        uses: softprops/action-gh-release@v1
+      - name: Publish/update release
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          files: uma-juece_v${{ steps.version.outputs.version }}.apk
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update Release Asset
-        if: steps.check_tag.outputs.exists == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          files: uma-juece_v${{ steps.version.outputs.version }}.apk
+          files: |
+            uma-juece_v${{ steps.version.outputs.version }}.apk
+            signature-report.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

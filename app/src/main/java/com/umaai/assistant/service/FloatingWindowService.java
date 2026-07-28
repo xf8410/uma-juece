@@ -214,6 +214,9 @@ public class FloatingWindowService extends Service implements HttpDataService.On
         if (intent != null && intent.hasExtra(EXTRA_DATA)) {
             handleData(intent.getStringExtra(EXTRA_DATA));
         }
+        if (intent != null && ACTION_UPLOAD_DATA.equals(intent.getAction())) {
+            finalizeCurrentSessionFromUser();
+        }
         // 从MainActivity传入剧本选择
         if (intent != null && intent.hasExtra("scenario")) {
             selectedScenario = intent.getStringExtra("scenario");
@@ -2780,17 +2783,7 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                         updateNotification("本地通信：" + HttpDataService.PORT + " | " + scenarioIdToLabel(selectedScenario) + " | 等待插件推送");
                     }
                 } else if (ACTION_UPLOAD_DATA.equals(action)) {
-                    // 手动上传当前育成数据
-                    if (dataCollector != null && dataCollector.getTurnCount() > 0) {
-                        int finalized = dataCollector.finalizeAndUpload();
-                        Log.d(TAG, "Manual upload requested, turns: " + finalized);
-                        Toast.makeText(FloatingWindowService.this,
-                            "已封存" + finalized + "回合，正在上传…",
-                            Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(FloatingWindowService.this,
-                            "没有可上传的数据", Toast.LENGTH_SHORT).show();
-                    }
+                    finalizeCurrentSessionFromUser();
                 }
             }
         };
@@ -2798,6 +2791,21 @@ public class FloatingWindowService extends Service implements HttpDataService.On
                 scenarioReceiver, new IntentFilter(ACTION_SCENARIO));
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 scenarioReceiver, new IntentFilter(ACTION_UPLOAD_DATA));
+    }
+
+    private void finalizeCurrentSessionFromUser() {
+        if (dataCollector == null) {
+            Toast.makeText(this, "采集器尚未就绪", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int finalized = dataCollector.finalizeAndUpload();
+        if (finalized > 0) {
+            Log.d(TAG, "Manual upload requested, observations/turns: " + finalized);
+            Toast.makeText(this, "已封存" + finalized + "条回合记录，已加入上传队列",
+                    Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "当前没有可封存的育成数据", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override

@@ -15,9 +15,12 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
 import com.umaai.assistant.service.DataCollector;
 import com.umaai.assistant.service.FloatingWindowService;
 import com.umaai.assistant.service.HttpDataService;
+import com.umaai.assistant.service.LocalBackupManager;
 import com.umaai.assistant.service.RemoteDataLoader;
 
 import java.io.BufferedReader;
@@ -27,6 +30,7 @@ import java.net.URL;
 
 public class MainActivity extends Activity {
     private static final int OVERLAY_PERMISSION_REQUEST = 123;
+    private static final int BACKUP_DIRECTORY_REQUEST = 124;
     public static final String PREFS_NAME = "uma_juece_prefs";
     public static final String KEY_SCENARIO = "selected_scenario";
 
@@ -66,6 +70,7 @@ public class MainActivity extends Activity {
 
     private TextView tvStatus;
     private TextView tvDataStatus;
+    private TextView tvBackupStatus;
     private Spinner spinnerScenario;
     private boolean spinnerInitialized = false;
 
@@ -105,7 +110,7 @@ public class MainActivity extends Activity {
                 // 通知浮窗更新剧本
                 Intent intent = new Intent(FloatingWindowService.ACTION_SCENARIO);
                 intent.putExtra("scenario", scenarioId);
-                sendBroadcast(intent);
+                LocalBroadcastManager.getInstance(MainActivity.this).sendBroadcast(intent);
                 Toast.makeText(MainActivity.this,
                         "剧本切换: " + SCENARIO_LABELS[pos], Toast.LENGTH_SHORT).show();
             }
@@ -154,11 +159,39 @@ public class MainActivity extends Activity {
         tvDataStatus = findViewById(R.id.tv_data_status);
         Button btnUploadData = findViewById(R.id.btn_upload_data);
         btnUploadData.setOnClickListener(v -> {
-            // 通知浮窗服务上传当前数据
-            Intent uploadIntent = new Intent(FloatingWindowService.ACTION_UPLOAD_DATA);
-            sendBroadcast(uploadIntent);
-            Toast.makeText(this, "已请求封存当前记录并上传", Toast.LENGTH_SHORT).show();
+            // 使用显式 Service Intent：即使主界面与浮窗的广播机制不同，
+            // 请求也一定交给 FloatingWindowService 处理；结果由服务按真实回合数提示。
+            Intent uploadIntent = new Intent(this, FloatingWindowService.class);
+            uploadIntent.setAction(FloatingWindowService.ACTION_UPLOAD_DATA);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(uploadIntent);
+            } else {
+                startService(uploadIntent);
+            }
         });
+
+        // === 无 Root 本地备份（Android SAF） ===
+        tvBackupStatus = findViewById(R.id.tv_backup_status);
+        Button btnChooseBackup = findViewById(R.id.btn_choose_backup);
+        btnChooseBackup.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+            startActivityForResult(intent, BACKUP_DIRECTORY_REQUEST);
+        });
+        Button btnBackupNow = findViewById(R.id.btn_backup_now);
+        btnBackupNow.setOnClickListener(v -> {
+            if (LocalBackupManager.getTreeUri(this) == null) {
+                Toast.makeText(this, "请先选择本地数据目录", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            LocalBackupManager.backupAllAsync(this);
+            Toast.makeText(this, "本地备份已在后台开始", Toast.LENGTH_SHORT).show();
+            tvBackupStatus.postDelayed(this::updateBackupStatus, 800);
+        });
+        updateBackupStatus();
 
         // 启动时加载数据
         loadDataIfNeeded();
@@ -179,13 +212,27 @@ public class MainActivity extends Activity {
             } else {
                 Toast.makeText(this, "需要悬浮窗权限", Toast.LENGTH_SHORT).show();
             }
+        } else if (requestCode == BACKUP_DIRECTORY_REQUEST && resultCode == RESULT_OK
+                && data != null && data.getData() != null) {
+            Uri tree = data.getData();
+            int flags = data.getFlags()
+                    & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            try {
+                getContentResolver().takePersistableUriPermission(tree, flags);
+                LocalBackupManager.setTreeUri(this, tree);
+                LocalBackupManager.backupAllAsync(this);
+                Toast.makeText(this, "本地目录已保存，正在备份", Toast.LENGTH_SHORT).show();
+            } catch (SecurityException e) {
+                Toast.makeText(this, "目录授权失败，请重新选择", Toast.LENGTH_LONG).show();
+            }
+            updateBackupStatus();
         }
     }
 
     private void loadDataIfNeeded() {
         if (RemoteDataLoader.isCached(this)) {
             SharedPreferences prefs = getSharedPreferences(RemoteDataLoader.PREFS_NAME, MODE_PRIVATE);
-            tvStatus.setText("数据已缓存 ✓\n本地通信：127.0.0.1:" + HttpDataService.PORT);
+            tvStatus.setText("基础数据已缓存 ✓\n本地通信：127.0.0.1:" + HttpDataService.PORT);
             return;
         }
 
@@ -280,9 +327,14 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void updateBackupStatus() {
+        if (tvBackupStatus != null) tvBackupStatus.setText(LocalBackupManager.getStatus(this));
+    }
+
     private void updateStatus() {
+        updateBackupStatus();
         if (RemoteDataLoader.isCached(this)) {
-            tvStatus.setText("数据已缓存 ✓\n本地通信：127.0.0.1:" + HttpDataService.PORT);
+            tvStatus.setText("基础数据已缓存 ✓\n本地通信：127.0.0.1:" + HttpDataService.PORT);
         }
     }
 }
